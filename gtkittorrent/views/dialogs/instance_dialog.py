@@ -183,6 +183,8 @@ class InstanceDialog(Adw.Window):
             self.feedback_lbl.set_markup("<span color='#e01b24'><b>Error:</b> Port must be a number between 1 and 65535</span>")
             return
 
+        is_local = host_ip in ("127.0.0.1", "localhost", "::1")
+
         if self.is_edit:
             self.settings.update_instance(
                 self.instance["id"],
@@ -191,7 +193,8 @@ class InstanceDialog(Adw.Window):
                 port=port,
                 username=username,
                 password=password,
-                use_https=use_https
+                use_https=use_https,
+                local=is_local
             )
             saved_inst = self.settings.get_instance(self.instance["id"])
             if self.on_saved:
@@ -205,6 +208,7 @@ class InstanceDialog(Adw.Window):
                 username=username,
                 password=password,
                 use_https=use_https,
+                local=is_local,
                 make_active=make_active
             )
             if self.on_saved:

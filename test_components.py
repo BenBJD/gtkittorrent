@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from unittest.mock import MagicMock, patch
 import gi
 gi.require_version('Gtk', '4.0')
@@ -181,6 +182,18 @@ class TestTorrentTable(unittest.TestCase):
 
 
 class TestClientMethods(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.mock_client = MagicMock(spec=QBittorrentClient)
+        self.mock_client.get_torrents.return_value = []
+        self.mock_client.get_transfer_info.return_value = {}
+        self.mock_client.get_categories.return_value = {}
+        self.mock_client.get_tags.return_value = []
+        self.mock_client.get_free_space.return_value = 1000
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
     @patch('qbittorrentapi.Client')
     def test_client_operations(self, mock_api_cls):
         mock_api = mock_api_cls.return_value
@@ -237,7 +250,7 @@ class TestClientMethods(unittest.TestCase):
         self.assertEqual(ver, 'v5.3.0')
 
     def test_settings_get_with_default(self):
-        s = Settings()
+        s = Settings(config_dir=self.tmp_dir.name)
         self.assertEqual(s.get("unknown_dummy_key", False), False)
         self.assertEqual(s.get("unknown_dummy_key", "custom"), "custom")
         self.assertEqual(s.defaults["host_ip"], "127.0.0.1")
@@ -274,10 +287,105 @@ class TestClientMethods(unittest.TestCase):
         self.assertTrue(pref_dlg.test_feedback_box.get_visible())
         self.assertIn("Success", pref_dlg.test_feedback_lbl.get_text())
 
+    def test_preferences_dialog_download_paths_and_temp_path_sensitivity(self):
+        mock_settings = MagicMock()
+        mock_settings.get.side_effect = lambda k, d=None: "127.0.0.1" if "ip" in k else "8080"
+        mock_client = MagicMock()
+        mock_client.get_app_preferences.return_value = {
+            "save_path": "/home/user/Downloads",
+            "temp_path_enabled": False,
+            "temp_path": "/home/user/Downloads/incomplete"
+        }
+
+        pref_dlg = PreferencesDialog(None, mock_settings, mock_client)
+        
+        # Verify browse buttons exist
+        self.assertIsNotNone(pref_dlg.save_path_browse_btn)
+        self.assertIsNotNone(pref_dlg.temp_path_browse_btn)
+        self.assertEqual(pref_dlg.save_path_entry.get_text(), "/home/user/Downloads")
+        self.assertEqual(pref_dlg.temp_path_entry.get_text(), "/home/user/Downloads/incomplete")
+
+        # Since temp_path_enabled is False, temp_path_entry should be greyed out (not sensitive)
+        self.assertFalse(pref_dlg.temp_path_switch.get_active())
+        self.assertFalse(pref_dlg.temp_path_entry.get_sensitive())
+
+        # When toggled to True, temp_path_entry should become sensitive
+        pref_dlg.temp_path_switch.set_active(True)
+        self.assertTrue(pref_dlg.temp_path_entry.get_sensitive())
+
+        # When toggled back to False, temp_path_entry should become insensitive
+        pref_dlg.temp_path_switch.set_active(False)
+        self.assertFalse(pref_dlg.temp_path_entry.get_sensitive())
+
+        # Test browsing directory helper
+        with patch("gtkittorrent.views.dialogs.preferences_dialog.Gtk.FileChooserNative") as mock_chooser_cls:
+            mock_chooser = MagicMock()
+            mock_chooser_cls.return_value = mock_chooser
+            
+            # Simulate user selecting a folder
+            def fake_connect(signal, callback):
+                if signal == "response":
+                    fake_file = MagicMock()
+                    fake_file.get_path.return_value = "/new/downloads/folder"
+                    mock_chooser.get_file.return_value = fake_file
+                    callback(mock_chooser, Gtk.ResponseType.ACCEPT)
+            mock_chooser.connect.side_effect = fake_connect
+
+            pref_dlg._on_browse_directory(pref_dlg.save_path_entry, "Select Save Directory")
+            self.assertEqual(pref_dlg.save_path_entry.get_text(), "/new/downloads/folder")
+
+    def test_preferences_dialog_engine_controls(self):
+        mock_settings = MagicMock()
+        mock_settings.get.side_effect = lambda k, d=None: "127.0.0.1" if "ip" in k else "8080"
+        mock_client = MagicMock()
+        mock_client.get_app_preferences.return_value = {}
+
+        pref_dlg = PreferencesDialog(None, mock_settings, mock_client)
+        
+        # Verify row and buttons exist
+        self.assertIsNotNone(pref_dlg.engine_control_row)
+        self.assertIsNotNone(pref_dlg.engine_start_btn)
+        self.assertIsNotNone(pref_dlg.engine_stop_btn)
+        self.assertIsNotNone(pref_dlg.engine_restart_btn)
+
+        # Status update UI: when running
+        pref_dlg._update_engine_status_ui(True, 8080)
+        self.assertIn("Running", pref_dlg.engine_control_row.get_subtitle())
+        self.assertFalse(pref_dlg.engine_start_btn.get_sensitive())
+        self.assertTrue(pref_dlg.engine_stop_btn.get_sensitive())
+        self.assertTrue(pref_dlg.engine_restart_btn.get_sensitive())
+
+        # Status update UI: when stopped
+        pref_dlg._update_engine_status_ui(False, 8080)
+        self.assertIn("Stopped", pref_dlg.engine_control_row.get_subtitle())
+        self.assertTrue(pref_dlg.engine_start_btn.get_sensitive())
+        self.assertFalse(pref_dlg.engine_stop_btn.get_sensitive())
+        self.assertTrue(pref_dlg.engine_restart_btn.get_sensitive())
+
+        # Test start click triggers start_daemon_async
+        with patch.object(pref_dlg.daemon_mgr, "start_daemon_async") as mock_start:
+            pref_dlg._on_engine_start_clicked(pref_dlg.engine_start_btn)
+            mock_start.assert_called_once()
+
+        # Test stop click triggers stop_daemon
+        with patch.object(pref_dlg.daemon_mgr, "stop_daemon") as mock_stop:
+            with patch("threading.Thread") as mock_thread:
+                pref_dlg._on_engine_stop_clicked(pref_dlg.engine_stop_btn)
+                mock_thread.assert_called_once()
+
+        # Test restart click triggers restart_daemon_async
+        with patch.object(pref_dlg.daemon_mgr, "restart_daemon_async") as mock_restart:
+            pref_dlg._on_engine_restart_clicked(pref_dlg.engine_restart_btn)
+            mock_restart.assert_called_once()
+
 
 class TestDetailsTabs(unittest.TestCase):
     def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
         self.mock_client = MagicMock(spec=QBittorrentClient)
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
 
     def test_speed_tab(self):
         speed_tab = SpeedTab(self.mock_client)
@@ -329,7 +437,8 @@ class TestDetailsTabs(unittest.TestCase):
             self.assertTrue(icon_name.endswith("-symbolic"))
 
     def test_settings_instances_management(self):
-        s = Settings()
+        s = Settings(config_dir=self.tmp_dir.name)
+        s.ensure_local_instance()
         instances = s.get_instances()
         self.assertGreaterEqual(len(instances), 1)
         curr = s.get_current_instance()
@@ -373,7 +482,7 @@ class TestDetailsTabs(unittest.TestCase):
         self.assertFalse(s.delete_instance(s.get_instances()[0]["id"]))
 
     def test_instance_dialog(self):
-        s = Settings()
+        s = Settings(config_dir=self.tmp_dir.name)
         # Test Add Mode
         dlg = InstanceDialog(None, s, instance=None)
         self.assertEqual(dlg.get_title(), "Add qBittorrent Instance")
@@ -408,7 +517,8 @@ class TestDetailsTabs(unittest.TestCase):
     def test_main_window_instance_switching(self):
         from gtkittorrent.views.main_window import MainWindow
         app = Adw.Application(application_id="test.instance.app")
-        app.settings = Settings()
+        app.settings = Settings(config_dir=self.tmp_dir.name)
+        app.settings.ensure_local_instance()
         mock_client = MagicMock()
         mock_client.get_torrents.return_value = []
         mock_client.get_transfer_info.return_value = {}
@@ -453,6 +563,15 @@ class TestDetailsTabs(unittest.TestCase):
         app.settings.delete_instance(server_inst["id"])
         app.settings.delete_instance(new_added["id"])
 
+        # Test _on_add_instance_clicked opens WelcomeWindow
+        with patch("gtkittorrent.views.main_window.WelcomeWindow") as mock_welcome_cls:
+            mock_welcome = MagicMock()
+            mock_welcome_cls.return_value = mock_welcome
+            win._on_add_instance_clicked()
+            mock_welcome_cls.assert_called_with(app, app.settings, mock_client, is_reconnect=False)
+            mock_welcome.set_transient_for.assert_called_with(win)
+            mock_welcome.present.assert_called_once()
+
     def test_sidebar_priority_buttons(self):
         sidebar = Sidebar(self.mock_client)
         self.assertIsNotNone(sidebar.top_prio_btn)
@@ -470,7 +589,7 @@ class TestDetailsTabs(unittest.TestCase):
         self.assertEqual(emitted, ["top", "up", "down", "bottom"])
 
     def test_torrent_table_column_widths_and_settings(self):
-        settings = Settings()
+        settings = Settings(config_dir=self.tmp_dir.name)
         table = TorrentTable(self.mock_client, settings=settings)
         table.reset_column_widths()
 
@@ -518,7 +637,7 @@ class TestDetailsTabs(unittest.TestCase):
         table.reset_column_widths()
 
     def test_torrent_table_column_order_and_reorder(self):
-        settings = Settings()
+        settings = Settings(config_dir=self.tmp_dir.name)
         table = TorrentTable(self.mock_client, settings=settings)
 
         # Initial order
@@ -628,6 +747,220 @@ class TestDetailsTabs(unittest.TestCase):
 
         # Ensure toggle details button has the bottom pane icon
         self.assertEqual(win.toggle_details_btn.get_icon_name(), "view-bottom-pane-symbolic")
+
+
+class TestLocalDaemonAndConfig(unittest.TestCase):
+    def test_daemon_binary_info(self):
+        from gtkittorrent.client.daemon import LocalDaemonManager
+        mgr = LocalDaemonManager.get_instance()
+        info = mgr.get_binary_info()
+        self.assertIn("has_nox", info)
+        self.assertIn("has_gui", info)
+        self.assertIn("preferred", info)
+        self.assertIn("recommend_nox", info)
+
+    def test_qbt_config_read_and_write(self):
+        import tempfile, os
+        from gtkittorrent.utils import qbt_config
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_conf = os.path.join(tmpdir, "qBittorrent.conf")
+            with patch.object(qbt_config, "find_existing_config_path", return_value=test_conf):
+                # 1. Non-existent initially
+                info = qbt_config.read_qbt_config()
+                self.assertFalse(info["exists"])
+
+                # 2. Configure
+                success, err = qbt_config.configure_qbt_webui(port=8999, enable=True, bypass_localhost_auth=True)
+                self.assertTrue(success)
+                self.assertIsNone(err)
+
+                # 3. Read back
+                info = qbt_config.read_qbt_config()
+                self.assertTrue(info["exists"])
+                self.assertTrue(info["webui_enabled"])
+                self.assertEqual(info["webui_port"], 8999)
+                self.assertFalse(info["localhost_auth"])
+
+    def test_welcome_window_carousel(self):
+        mock_settings = MagicMock()
+        mock_settings.get.side_effect = lambda k, d=None: "127.0.0.1" if "ip" in k else "8080"
+        mock_client = MagicMock()
+
+        # Test initial open (mode selection)
+        welcome = WelcomeWindow(None, mock_settings, mock_client, is_reconnect=False)
+        self.assertIsNotNone(welcome.carousel)
+        self.assertEqual(welcome.carousel.get_n_pages(), 3)
+        self.assertFalse(welcome.back_btn.get_visible())
+
+        # Test navigation to local page
+        welcome._go_to_page(1)
+        self.assertTrue(welcome.back_btn.get_visible())
+        self.assertIn("Local", welcome.title_widget.get_title())
+
+        # Test navigation to remote page
+        welcome._go_to_page(2)
+        self.assertTrue(welcome.back_btn.get_visible())
+        self.assertIn("Remote", welcome.title_widget.get_title())
+
+        # Test back to mode page
+        welcome._go_to_page(0)
+        self.assertFalse(welcome.back_btn.get_visible())
+
+    def test_welcome_window_reconnect_routing(self):
+        mock_settings = MagicMock()
+        mock_settings.get.side_effect = lambda k, d=None: "127.0.0.1" if "ip" in k else "8080"
+        mock_client = MagicMock()
+
+        # Reconnect on local instance routes to local page (page 1)
+        welcome = WelcomeWindow(None, mock_settings, mock_client, is_reconnect=True)
+        self.assertTrue(welcome.back_btn.get_visible())
+        self.assertIn("Local", welcome.title_widget.get_title())
+
+    def test_main_window_offline_banner(self):
+        from gtkittorrent.views.main_window import MainWindow
+        mock_client = MagicMock()
+        mock_client.get_torrents.return_value = []
+        mock_client.is_connected.return_value = False
+        mock_client.get_transfer_info.return_value = {}
+        mock_client.get_app_preferences.return_value = {}
+        mock_client.get_free_space.return_value = 1000
+
+        app = Adw.Application(application_id="io.test.gtkittorrent", flags=Gio.ApplicationFlags.FLAGS_NONE)
+        app.settings = MagicMock()
+        app.settings.get_current_instance.return_value = {
+            "id": "default", "name": "Local qBittorrent", "host_ip": "127.0.0.1", "port": 8080
+        }
+        win = MainWindow(app, mock_client)
+        self.assertTrue(hasattr(win, "offline_banner"))
+        self.assertTrue(win.offline_banner.get_revealed())
+        self.assertIn("Local", win.offline_banner.get_title())
+        self.assertEqual(win.offline_banner.get_button_label(), "Start Engine")
+
+    def test_main_window_startup_loading_and_cancel(self):
+        from gtkittorrent.views.main_window import MainWindow
+        mock_client = MagicMock()
+        mock_client.get_torrents.return_value = []
+        mock_client.is_connected.return_value = False
+        mock_client.get_transfer_info.return_value = {}
+        mock_client.get_app_preferences.return_value = {}
+        mock_client.get_free_space.return_value = 1000
+
+        app = Adw.Application(application_id="io.test.gtkittorrent.loading", flags=Gio.ApplicationFlags.FLAGS_NONE)
+        app.settings = MagicMock()
+        app.settings.get_current_instance.return_value = {
+            "id": "local", "name": "Local qBittorrent", "host_ip": "127.0.0.1", "port": 8080
+        }
+
+        win = MainWindow(app, mock_client)
+        self.assertTrue(hasattr(win, "content_stack"))
+        self.assertTrue(hasattr(win, "loading_spinner"))
+        self.assertTrue(hasattr(win, "loading_page"))
+
+        # Default child is main view
+        self.assertEqual(win.content_stack.get_visible_child_name(), "main")
+
+        # When starting connection, switches to loading view
+        with patch("threading.Thread") as mock_thread:
+            win.start_initial_connection()
+            self.assertEqual(win.content_stack.get_visible_child_name(), "loading")
+            self.assertIn("Local qBittorrent", win.loading_page.get_title())
+
+        # When user cancels loading
+        win._cancel_loading()
+        self.assertEqual(win.content_stack.get_visible_child_name(), "main")
+        self.assertTrue(win.offline_banner.get_revealed())
+
+    def test_settings_ensure_local_instance(self):
+        import tempfile
+        from settings import Settings
+        with tempfile.TemporaryDirectory() as tmpdir:
+            s = Settings(config_dir=tmpdir)
+            self.assertIsNone(s.get_local_instance())
+            
+            # Call ensure_local_instance
+            loc = s.ensure_local_instance()
+            self.assertIsNotNone(loc)
+            self.assertTrue(loc["local"])
+            self.assertEqual(loc["name"], "Local qBittorrent")
+            self.assertEqual(s.get_local_instance()["id"], loc["id"])
+
+            # Calling again returns same instance
+            loc2 = s.ensure_local_instance()
+            self.assertEqual(loc2["id"], loc["id"])
+
+    def test_welcome_window_multi_instance_flow(self):
+        mock_settings = MagicMock()
+        mock_settings.get.side_effect = lambda k, d=None: "127.0.0.1" if "ip" in k else "8080"
+        mock_settings.get_instances.return_value = []
+        mock_client = MagicMock()
+
+        welcome = WelcomeWindow(None, mock_settings, mock_client, is_reconnect=False)
+        self.assertFalse(hasattr(welcome, "finish_header_btn"))
+
+        # Remote default name should be "Server"
+        self.assertEqual(welcome.name_entry.get_text(), "Server")
+
+        # Simulate local engine status reporting running
+        welcome._on_local_engine_status_result(True, 8080)
+        self.assertTrue(welcome.local_success_banner.get_revealed())
+
+        # Saving local and adding another should return to page 0 with local greyed out
+        welcome._on_local_save_and_add_another()
+        self.assertFalse(welcome.local_row.get_sensitive())
+        self.assertEqual(welcome.local_row_suffix_img.get_icon_name(), "emblem-ok-symbolic")
+
+        # Test remote add another flow resets and returns to page 0
+        welcome._go_to_page(2)
+        welcome.name_entry.set_text("My Seedbox")
+        welcome._on_remote_save_result(True, "Connected", "My Seedbox", "192.168.1.50", "8080", "admin", "pw", False, "http://192.168.1.50:8080", finish_after=False)
+        self.assertEqual(welcome.name_entry.get_text(), "Server")
+        self.assertFalse(welcome.local_row.get_sensitive())
+
+        # Test finish flow marks welcome_completed
+        welcome._finish_and_open()
+        mock_settings.set.assert_any_call("welcome_completed", True)
+        mock_settings.set.assert_any_call("configured", True)
+
+    def test_remote_first_does_not_add_local(self):
+        import tempfile
+        from settings import Settings
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(config_dir=tmpdir)
+            self.assertEqual(settings.get_instances(), [])
+            self.assertIsNone(settings.get_local_instance())
+
+            # Add a remote instance
+            inst = settings.add_instance("My NAS", "192.168.1.10", 8080, "admin", "secret", local=False)
+            self.assertFalse(inst["local"])
+            self.assertEqual(len(settings.get_instances()), 1)
+            self.assertIsNone(settings.get_local_instance())
+
+            # Test in welcome window
+            mock_client = MagicMock()
+            welcome = WelcomeWindow(None, settings, mock_client, is_reconnect=False)
+            self.assertFalse(welcome.local_configured)
+            self.assertTrue(welcome.local_row.get_sensitive())
+
+    def test_welcome_window_opened_post_setup(self):
+        import tempfile
+        from settings import Settings
+        with tempfile.TemporaryDirectory() as tmpdir:
+            settings = Settings(config_dir=tmpdir)
+            settings.set("welcome_completed", True)
+            inst = settings.add_instance("Home Server", "192.168.1.100", 8080, "admin", "secret", local=False)
+
+            mock_client = MagicMock()
+            welcome = WelcomeWindow(None, settings, mock_client, is_reconnect=False)
+            
+            # Since welcome_completed is True, header has Done button
+            self.assertTrue(hasattr(welcome, "done_header_btn"))
+            self.assertEqual(welcome.done_header_btn.get_label(), "Done")
+
+            # Configured instances are shown with the Done button at bottom
+            self.assertTrue(welcome.configured_instances_group.get_visible())
+            self.assertTrue(welcome.mode_finish_btn.get_visible())
+            self.assertEqual(welcome.mode_finish_btn.get_label(), "Done")
+            self.assertEqual(len(welcome.summary_rows), 1)
 
 
 if __name__ == "__main__":

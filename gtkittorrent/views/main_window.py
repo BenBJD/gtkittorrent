@@ -1,5 +1,7 @@
 import gi
 import os
+import time
+import threading
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Gdk, Gio, GLib, Adw, Pango
@@ -38,10 +40,41 @@ class MainWindow(Adw.Window):
         self._setup_headerbar()
         self._update_instance_ui()
 
+        # Offline / Daemon Status Banner
+        self.offline_banner = Adw.Banner(title="Local qBittorrent is offline.", button_label="Start Engine")
+        self.offline_banner.connect("button-clicked", self._on_banner_button_clicked)
+        self.offline_banner.set_revealed(False)
+        self.main_box.append(self.offline_banner)
+
+        # Content ViewStack: allows switching between Main view and Loading view
+        self.content_stack = Adw.ViewStack()
+        self.content_stack.set_vexpand(True)
+        self.main_box.append(self.content_stack)
+
         # 2. Main Paned Layout
         self.v_paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
         self.v_paned.set_vexpand(True)
-        self.main_box.append(self.v_paned)
+        self.content_stack.add_named(self.v_paned, "main")
+
+        # Loading Page
+        self.loading_page = Adw.StatusPage()
+        self.loading_page.set_icon_name("network-workgroup-symbolic")
+        self.loading_page.set_title("Connecting to qBittorrent…")
+        self.loading_page.set_description("Please wait while the connection is established…")
+        self.loading_page.set_vexpand(True)
+
+        loading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16, halign=Gtk.Align.CENTER)
+        self.loading_spinner = Gtk.Spinner()
+        self.loading_spinner.set_size_request(36, 36)
+        loading_box.append(self.loading_spinner)
+
+        cancel_btn = Gtk.Button(label="Work Offline", css_classes=["pill"], halign=Gtk.Align.CENTER)
+        cancel_btn.connect("clicked", lambda b: self._cancel_loading())
+        loading_box.append(cancel_btn)
+
+        self.loading_page.set_child(loading_box)
+        self.content_stack.add_named(self.loading_page, "loading")
+        self.content_stack.set_visible_child_name("main")
 
         # Top Horizontal Paned: Sidebar + TorrentTable
         self.h_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -343,8 +376,8 @@ class MainWindow(Adw.Window):
             edit_btn.connect("clicked", lambda b, it=inst: self._on_edit_instance_clicked(it))
             row.add_suffix(edit_btn)
 
-            # Delete button (if > 1 instance)
-            if len(instances) > 1:
+            # Delete button (if > 1 instance and not the protected local instance)
+            if len(instances) > 1 and not inst.get("local"):
                 del_btn = Gtk.Button(icon_name="user-trash-symbolic", tooltip_text="Delete instance")
                 del_btn.add_css_class("flat")
                 del_btn.set_valign(Gtk.Align.CENTER)
@@ -419,8 +452,17 @@ class MainWindow(Adw.Window):
     def _on_add_instance_clicked(self, *args):
         self.instance_popover.popdown()
         settings = getattr(self.app, "settings", None)
-        dlg = InstanceDialog(self, settings, instance=None, on_saved=self._on_instance_saved)
-        dlg.present()
+        welcome_win = WelcomeWindow(self.app, settings, self.client, is_reconnect=False)
+        welcome_win.set_transient_for(self)
+        welcome_win.set_modal(True)
+
+        def on_connected(w):
+            curr_inst = self._get_current_instance_safe()
+            if curr_inst and curr_inst.get("id"):
+                self.switch_to_instance(curr_inst.get("id"), force=True)
+
+        welcome_win.connect("connected", on_connected)
+        welcome_win.present()
 
     def _on_edit_instance_clicked(self, inst):
         self.instance_popover.popdown()
@@ -483,6 +525,150 @@ class MainWindow(Adw.Window):
         welcome_win.connect("connected", lambda w: self.refresh_torrents())
         welcome_win.present()
 
+    def _cancel_loading(self):
+        self.loading_spinner.stop()
+        self.content_stack.set_visible_child_name("main")
+        self.offline_banner.set_revealed(True)
+        self.refresh_torrents()
+
+    def start_initial_connection(self):
+        curr_inst = self._get_current_instance_safe()
+        inst_name = curr_inst.get("name", "Local qBittorrent")
+        host_ip = curr_inst.get("host_ip", "127.0.0.1")
+        try:
+            port = int(curr_inst.get("port", 8080))
+        except (ValueError, TypeError):
+            port = 8080
+
+        is_local = curr_inst.get("local", False) or host_ip in ("127.0.0.1", "localhost", "::1")
+        autostart = True
+        if hasattr(self.app, "settings") and self.app.settings:
+            autostart = bool(self.app.settings.get("engine_autostart", True))
+
+        self.loading_page.set_title(f"Connecting to {inst_name}…")
+        if is_local and autostart:
+            self.loading_page.set_description("Checking service and starting local engine if needed…")
+        else:
+            self.loading_page.set_description("Waiting for response…")
+
+        self.loading_spinner.start()
+        self.content_stack.set_visible_child_name("loading")
+
+        def on_connected():
+            self.loading_spinner.stop()
+            self.content_stack.set_visible_child_name("main")
+            self.offline_banner.set_revealed(False)
+            self.refresh_torrents()
+            self.show_toast(f"Connected to {inst_name}")
+
+        def on_failed(reason=""):
+            self.loading_spinner.stop()
+            self.content_stack.set_visible_child_name("main")
+            if is_local:
+                msg = f"Local qBittorrent is offline. ({reason})" if reason else "Local qBittorrent is offline."
+                self.offline_banner.set_title(msg)
+                self.offline_banner.set_button_label("Start Engine")
+            else:
+                msg = f"Cannot connect to {inst_name} ({host_ip}:{port})."
+                self.offline_banner.set_title(msg)
+                self.offline_banner.set_button_label("Reconnect")
+            self.offline_banner.set_revealed(True)
+            self.refresh_torrents()
+
+        def connect_worker():
+            # 1. Quick probe
+            try:
+                if self.client.connect():
+                    GLib.idle_add(on_connected)
+                    return
+            except Exception:
+                pass
+
+            # 2. If local & autostart enabled, trigger local daemon manager
+            if is_local and autostart:
+                def update_status():
+                    self.loading_page.set_description("Starting local qBittorrent background engine…")
+                GLib.idle_add(update_status)
+
+                from ..client.daemon import LocalDaemonManager
+                def on_daemon_done(success, msg):
+                    if success:
+                        def retry_connect():
+                            connected = False
+                            for _ in range(12):
+                                time.sleep(0.5)
+                                try:
+                                    if self.client.connect():
+                                        connected = True
+                                        break
+                                except Exception:
+                                    pass
+                            if connected:
+                                GLib.idle_add(on_connected)
+                            else:
+                                GLib.idle_add(on_failed, "Engine started, but Web UI did not respond")
+                        threading.Thread(target=retry_connect, daemon=True).start()
+                    else:
+                        GLib.idle_add(on_failed, msg)
+
+                LocalDaemonManager.get_instance().start_daemon_async(port=port, callback=on_daemon_done)
+            else:
+                # Remote or local without autostart: poll with timeout up to 5 seconds
+                connected = False
+                for _ in range(5):
+                    time.sleep(1.0)
+                    try:
+                        if self.client.connect():
+                            connected = True
+                            break
+                    except Exception:
+                        pass
+                if connected:
+                    GLib.idle_add(on_connected)
+                else:
+                    GLib.idle_add(on_failed, "Connection timed out")
+
+        threading.Thread(target=connect_worker, daemon=True).start()
+
+    def _on_banner_button_clicked(self, banner):
+        curr_inst = self._get_current_instance_safe()
+        host_ip = curr_inst.get("host_ip", "127.0.0.1")
+        try:
+            port = int(curr_inst.get("port", 8080))
+        except (ValueError, TypeError):
+            port = 8080
+        is_local = host_ip in ("127.0.0.1", "localhost", "::1")
+
+        if is_local:
+            banner.set_title("Starting local qBittorrent...")
+            banner.set_button_label("")
+            from ..client.daemon import LocalDaemonManager
+            def on_started(success, msg):
+                if success:
+                    banner.set_revealed(False)
+                    self.client.connect()
+                    self.refresh_torrents()
+                    self.show_toast("Connected to local qBittorrent")
+                else:
+                    banner.set_title(f"Failed to start engine: {msg}")
+                    banner.set_button_label("Retry")
+            LocalDaemonManager.get_instance().start_daemon_async(port=port, callback=on_started)
+        else:
+            banner.set_title("Connecting to Web UI...")
+            banner.set_button_label("")
+            def worker():
+                connected = self.client.connect()
+                def on_done():
+                    if connected:
+                        banner.set_revealed(False)
+                        self.refresh_torrents()
+                        self.show_toast("Connected to qBittorrent Web UI")
+                    else:
+                        banner.set_title(f"Cannot connect to {curr_inst.get('name', 'instance')}.")
+                        banner.set_button_label("Setup")
+                GLib.idle_add(on_done)
+            threading.Thread(target=worker, daemon=True).start()
+
     def format_speed(self, speed):
         """Maintained for backwards compatibility with test_app.py."""
         if speed < 1024:
@@ -497,6 +683,31 @@ class MainWindow(Adw.Window):
         torrents_data = self.client.get_torrents()
         if not hasattr(torrents_data, '__iter__') or isinstance(torrents_data, (str, bytes)):
             torrents_data = []
+
+        # Check connection status for offline banner
+        is_conn = False
+        if hasattr(self.client, "is_connected"):
+            try:
+                is_conn = bool(self.client.is_connected())
+            except Exception:
+                is_conn = False
+        if not is_conn and torrents_data:
+            is_conn = True
+
+        if not is_conn and len(torrents_data) == 0:
+            curr_inst = self._get_current_instance_safe()
+            host_ip = curr_inst.get("host_ip", "127.0.0.1")
+            is_local = host_ip in ("127.0.0.1", "localhost", "::1")
+            if is_local:
+                self.offline_banner.set_title("Local qBittorrent is offline.")
+                self.offline_banner.set_button_label("Start Engine")
+            else:
+                self.offline_banner.set_title(f"Cannot connect to {curr_inst.get('name', 'remote instance')}.")
+                self.offline_banner.set_button_label("Reconnect")
+            self.offline_banner.set_revealed(True)
+        else:
+            if self.offline_banner.get_revealed():
+                self.offline_banner.set_revealed(False)
         
         # Build maps
         new_data_by_hash = {

@@ -4,16 +4,19 @@ import uuid
 from gi.repository import GLib
 
 class Settings:
-    def __init__(self):
-        config_parent = GLib.get_user_config_dir()
-        self.config_dir = os.path.join(config_parent, "gtkittorrent")
-        old_config_dir = os.path.join(config_parent, "gtkitorrent")
-        if not os.path.exists(self.config_dir) and os.path.exists(old_config_dir):
-            try:
-                import shutil
-                shutil.copytree(old_config_dir, self.config_dir)
-            except Exception:
-                pass
+    def __init__(self, config_dir=None):
+        if config_dir:
+            self.config_dir = config_dir
+        else:
+            config_parent = GLib.get_user_config_dir()
+            self.config_dir = os.path.join(config_parent, "gtkittorrent")
+            old_config_dir = os.path.join(config_parent, "gtkitorrent")
+            if not os.path.exists(self.config_dir) and os.path.exists(old_config_dir):
+                try:
+                    import shutil
+                    shutil.copytree(old_config_dir, self.config_dir)
+                except Exception:
+                    pass
         self.config_file = os.path.join(self.config_dir, "settings.json")
         self.defaults = {
             "host": "http://127.0.0.1:8080",
@@ -23,7 +26,11 @@ class Settings:
             "username": "admin",
             "password": "adminpassword",
             "configured": False,
+            "welcome_completed": False,
             "current_instance_id": "default",
+            "engine_autostart": True,
+            "engine_stop_on_exit": False,
+            "engine_binary_preference": "auto",
             "column_order": [
                 "#",
                 "Name",
@@ -72,25 +79,18 @@ class Settings:
                 "Tags": True,
                 "Added On": True,
             },
-            "instances": [
-                {
-                    "id": "default",
-                    "name": "Local qBittorrent",
-                    "host_ip": "127.0.0.1",
-                    "port": "8080",
-                    "use_https": False,
-                    "username": "admin",
-                    "password": "adminpassword",
-                    "host": "http://127.0.0.1:8080"
-                }
-            ]
+            "instances": []
         }
         self.data = self.defaults.copy()
         self.load()
 
     def _ensure_instances(self):
         instances = self.data.get("instances")
-        if not isinstance(instances, list) or len(instances) == 0:
+        if not isinstance(instances, list):
+            instances = []
+            self.data["instances"] = instances
+
+        if len(instances) == 0 and self.data.get("configured", False):
             host_ip = str(self.data.get("host_ip") or "127.0.0.1")
             port = str(self.data.get("port") or "8080")
             use_https = bool(self.data.get("use_https", False))
@@ -98,19 +98,22 @@ class Settings:
             password = str(self.data.get("password") or "adminpassword")
             protocol = "https" if use_https else "http"
             host = self.data.get("host") or f"{protocol}://{host_ip}:{port}"
+            is_local = host_ip in ("127.0.0.1", "localhost", "::1")
             default_inst = {
                 "id": "default",
-                "name": "Local qBittorrent",
+                "name": "Local qBittorrent" if is_local else "Server",
                 "host_ip": host_ip,
                 "port": port,
                 "use_https": use_https,
                 "username": username,
                 "password": password,
-                "host": host
+                "host": host,
+                "local": is_local
             }
             self.data["instances"] = [default_inst]
             self.data["current_instance_id"] = "default"
         else:
+            has_local = False
             for inst in self.data["instances"]:
                 if "id" not in inst:
                     inst["id"] = uuid.uuid4().hex[:8]
@@ -121,10 +124,22 @@ class Settings:
                 protocol = "https" if inst.get("use_https") else "http"
                 if "host" not in inst:
                     inst["host"] = f"{protocol}://{inst.get('host_ip', '127.0.0.1')}:{inst.get('port', '8080')}"
+                if "local" not in inst:
+                    is_local_ip = inst.get("host_ip") in ("127.0.0.1", "localhost", "::1")
+                    if is_local_ip and not has_local and "local" in inst.get("name", "").lower():
+                        inst["local"] = True
+                        has_local = True
+                    else:
+                        inst["local"] = False
+                elif inst.get("local"):
+                    if has_local:
+                        inst["local"] = False
+                    else:
+                        has_local = True
 
         current_id = self.data.get("current_instance_id")
         inst_ids = [inst["id"] for inst in self.data["instances"]]
-        if current_id not in inst_ids:
+        if len(self.data["instances"]) > 0 and current_id not in inst_ids:
             self.data["current_instance_id"] = self.data["instances"][0]["id"]
 
         self._sync_top_level_from_current()
@@ -138,6 +153,7 @@ class Settings:
             self.data["password"] = curr.get("password", "")
             self.data["use_https"] = curr.get("use_https", False)
             self.data["host"] = curr.get("host", f"http://{curr.get('host_ip', '127.0.0.1')}:{curr.get('port', '8080')}")
+            self.data["name"] = curr.get("name", "Local qBittorrent")
 
     def load(self):
         if os.path.exists(self.config_file):
@@ -194,7 +210,43 @@ class Settings:
             if inst.get("id") == curr_id:
                 return inst
         instances = self.data.get("instances", [])
-        return instances[0] if instances else None
+        if instances:
+            return instances[0]
+        host_ip = str(self.data.get("host_ip") or "127.0.0.1")
+        port = str(self.data.get("port") or "8080")
+        use_https = bool(self.data.get("use_https", False))
+        protocol = "https" if use_https else "http"
+        return {
+            "id": "default",
+            "name": self.data.get("name") or "Local qBittorrent",
+            "host_ip": host_ip,
+            "port": port,
+            "use_https": use_https,
+            "username": str(self.data.get("username") or "admin"),
+            "password": str(self.data.get("password") or ""),
+            "host": self.data.get("host") or f"{protocol}://{host_ip}:{port}",
+            "local": host_ip in ("127.0.0.1", "localhost", "::1")
+        }
+
+    def get_local_instance(self):
+        for inst in self.data.get("instances", []):
+            if inst.get("local", False):
+                return inst
+        return None
+
+    def ensure_local_instance(self, port="8080", username="admin", password=""):
+        local = self.get_local_instance()
+        if not local:
+            return self.add_instance(
+                "Local qBittorrent",
+                "127.0.0.1",
+                str(port),
+                username,
+                password,
+                local=True,
+                make_active=False
+            )
+        return local
 
     def get_instance(self, instance_id):
         for inst in self.data.get("instances", []):
@@ -211,19 +263,23 @@ class Settings:
             return True
         return False
 
-    def add_instance(self, name, host_ip, port, username, password, use_https=False, make_active=True):
+    def add_instance(self, name, host_ip, port, username, password, use_https=False, local=False, make_active=True):
         new_id = uuid.uuid4().hex[:8]
         protocol = "https" if use_https else "http"
         full_host = f"{protocol}://{host_ip}:{port}"
+        if local:
+            for other in self.data.get("instances", []):
+                other["local"] = False
         inst = {
             "id": new_id,
-            "name": name.strip() or f"{host_ip}:{port}",
+            "name": name.strip() or ("Local qBittorrent" if local else "Server"),
             "host_ip": str(host_ip).strip(),
             "port": str(port).strip(),
             "use_https": bool(use_https),
             "username": str(username).strip(),
             "password": str(password),
-            "host": full_host
+            "host": full_host,
+            "local": bool(local)
         }
         self.data.setdefault("instances", []).append(inst)
         if make_active:
@@ -236,6 +292,19 @@ class Settings:
         inst = self.get_instance(instance_id)
         if not inst:
             return False
+        if kwargs.get("local"):
+            for other in self.data.get("instances", []):
+                if other.get("id") != instance_id:
+                    other["local"] = False
+        for k in ["name", "host_ip", "port", "username", "password", "use_https", "local"]:
+            if k in kwargs and kwargs[k] is not None:
+                inst[k] = kwargs[k]
+        protocol = "https" if inst.get("use_https") else "http"
+        inst["host"] = f"{protocol}://{inst.get('host_ip')}:{inst.get('port')}"
+        if self.get_current_instance_id() == instance_id:
+            self._sync_top_level_from_current()
+        self.save()
+        return True
         for k in ["name", "host_ip", "port", "username", "password", "use_https"]:
             if k in kwargs and kwargs[k] is not None:
                 inst[k] = kwargs[k]

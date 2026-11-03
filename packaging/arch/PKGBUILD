@@ -13,6 +13,10 @@ depends=(
     'python-gobject'
     'python-qbittorrent-api'
 )
+optdepends=(
+    'qbittorrent-nox: Recommended headless daemon for local background torrenting'
+    'qbittorrent: Desktop application fallback for local instances'
+)
 makedepends=('git')
 source=(
     "$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz"

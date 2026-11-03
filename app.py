@@ -39,16 +39,20 @@ class GTKittorrentApp(Adw.Application):
             self.win.present()
             return
 
-        is_configured = self.settings.get("configured", False)
-        connected = self.client.connect()
-
-        if not is_configured and not connected:
+        is_welcome_completed = self.settings.get("welcome_completed", False)
+        if not is_welcome_completed:
             self._show_welcome_screen(is_reconnect=False)
-        elif not connected:
-            self._show_welcome_screen(is_reconnect=True)
-        else:
-            self.settings.set("configured", True)
-            self._show_main_window()
+            return
+
+        self.settings.set("configured", True)
+        self._show_main_window()
+        self.win.start_initial_connection()
+
+    def do_shutdown(self):
+        if self.settings.get("engine_stop_on_exit", False):
+            from gtkittorrent.client.daemon import LocalDaemonManager
+            LocalDaemonManager.get_instance().stop_daemon(self.client)
+        Adw.Application.do_shutdown(self)
 
     def do_open(self, files, n_files, hint):
         self.do_activate()
