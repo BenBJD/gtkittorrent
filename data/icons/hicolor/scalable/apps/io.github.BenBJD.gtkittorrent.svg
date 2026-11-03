@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Drop Shadow for base plate -->
+    <filter id="tile-shadow" x="-20%" y="-15%" width="140%" height="145%">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#051833" flood-opacity="0.45" />
+      <feDropShadow dx="0" dy="2" stdDeviation="1.5" flood-color="#051833" flood-opacity="0.2" />
+    </filter>
+
+    <!-- Drop Shadow for cat silhouette badge -->
+    <filter id="cat-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#0a2d59" flood-opacity="0.4" />
+    </filter>
+
+    <!-- Arrow drop shadow -->
+    <filter id="arrow-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+
+    <!-- Primary Tile Gradient (GNOME Libadwaita Blue) -->
+    <linearGradient id="tile-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3584e4" />
+      <stop offset="50%" stop-color="#1c71d8" />
+      <stop offset="100%" stop-color="#16529e" />
+    </linearGradient>
+
+    <!-- Inset Top Rim Highlight -->
+    <linearGradient id="rim-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35" />
+      <stop offset="15%" stop-color="#ffffff" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.2" />
+    </linearGradient>
+
+    <!-- Cat Silhouette Gradient -->
+    <linearGradient id="cat-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#e4eaf2" />
+    </linearGradient>
+
+    <!-- Ear Accents -->
+    <linearGradient id="ear-accent" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ff7b72" />
+      <stop offset="100%" stop-color="#f66151" />
+    </linearGradient>
+
+    <!-- Inner Screen/Well Gradient -->
+    <linearGradient id="well-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f3e7a" />
+      <stop offset="100%" stop-color="#1a5fb4" />
+    </linearGradient>
+
+    <!-- Download Arrow Gradient (Electric Cyan / Light Blue) -->
+    <linearGradient id="dl-arrow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#78e2fc" />
+      <stop offset="100%" stop-color="#3584e4" />
+    </linearGradient>
+
+    <!-- Upload Arrow Gradient (Vivid Emerald Green) -->
+    <linearGradient id="ul-arrow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#57e389" />
+      <stop offset="100%" stop-color="#26a269" />
+    </linearGradient>
+  </defs>
+
+  <!-- 1. Background Squircle Base (GNOME HIG 128x128 grid: 96x96, rx=22) -->
+  <rect x="16" y="16" width="96" height="96" rx="22" fill="url(#tile-grad)" filter="url(#tile-shadow)" />
+  <!-- Inset highlight stroke -->
+  <rect x="16.5" y="16.5" width="95" height="95" rx="21.5" fill="none" stroke="url(#rim-grad)" stroke-width="1" />
+
+  <!-- Background decorative depth ring -->
+  <circle cx="64" cy="66" r="40" fill="#0d3363" opacity="0.2" />
+
+  <!-- 2. Cat Silhouette with Ears (White Hero Emblem) -->
+  <g filter="url(#cat-shadow)">
+    <!-- Left Ear -->
+    <path d="M 38,54 L 31,31 L 53,42 Z" fill="url(#cat-grad)" />
+    <path d="M 38,50 L 33,35 L 49,43 Z" fill="url(#ear-accent)" opacity="0.9" />
+
+    <!-- Right Ear -->
+    <path d="M 90,54 L 97,31 L 75,42 Z" fill="url(#cat-grad)" />
+    <path d="M 90,50 L 95,35 L 79,43 Z" fill="url(#ear-accent)" opacity="0.9" />
+
+    <!-- Cat Head Base (Sleek Squircle Shield) -->
+    <rect x="33" y="41" width="62" height="52" rx="20" fill="url(#cat-grad)" />
+    <!-- Cat Chin Contour -->
+    <path d="M 50,91 C 56,96 72,96 78,91 Z" fill="url(#cat-grad)" />
+  </g>
+
+  <!-- 3. Inner Screen / Display Well -->
+  <rect x="39" y="47" width="50" height="40" rx="14" fill="url(#well-grad)" />
+
+  <!-- 4. P2P Dual Arrows (Half-sized, clean, without dots) -->
+  <!-- Download Arrow: Left side, pointing DOWN (Cyan / Blue) -->
+  <g filter="url(#arrow-shadow)">
+    <path d="M 54,59.5 L 54,68.5 M 50.5,65 L 54,68.5 L 57.5,65" 
+          stroke="url(#dl-arrow)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  </g>
+
+  <!-- Upload Arrow: Right side, pointing UP (Mint / Green) -->
+  <g filter="url(#arrow-shadow)">
+    <path d="M 74,68.5 L 74,59.5 M 70.5,63 L 74,59.5 L 77.5,63" 
+          stroke="url(#ul-arrow)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  </g>
+
+  <!-- 5. Cute Whiskers (Data signal streaks on cheeks) -->
+  <!-- Left Whiskers -->
+  <path d="M 22,63 L 30,64 M 20,69 L 30,69 M 22,75 L 30,74" 
+        stroke="#ffffff" stroke-opacity="0.75" stroke-width="2.2" stroke-linecap="round" />
+  <!-- Right Whiskers -->
+  <path d="M 106,63 L 98,64 M 108,69 L 98,69 M 106,75 L 98,74" 
+        stroke="#ffffff" stroke-opacity="0.75" stroke-width="2.2" stroke-linecap="round" />
+
+  <!-- Subtle cat nose at bottom center -->
+  <polygon points="62,72 66,72 64,74" fill="#ff7b72" opacity="0.8" />
+</svg>

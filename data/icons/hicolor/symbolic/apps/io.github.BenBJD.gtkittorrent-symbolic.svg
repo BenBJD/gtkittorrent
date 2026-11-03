@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Cat Ears -->
+  <path fill="#2e3436" d="M 3 2 L 6 4 L 4 6 Z M 13 2 L 10 4 L 12 6 Z" />
+  <!-- Cat Face Silhouette -->
+  <path fill="#2e3436" d="M 3 5 C 3 4.4 3.4 4 4 4 L 12 4 C 12.6 4 13 4.4 13 5 L 13 11 C 13 13 11 14 8 14 C 5 14 3 13 3 11 Z" />
+  <!-- Central Download Arrow -->
+  <path stroke="#ffffff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"
+        d="M 8 5.5 L 8 11 M 6 9 L 8 11 L 10 9" />
+</svg>
