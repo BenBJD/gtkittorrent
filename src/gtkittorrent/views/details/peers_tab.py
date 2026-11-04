@@ -5,6 +5,7 @@ from ...models.peer import PeerItem
 
 class PeersTab(Gtk.Box):
     """Peers tab displaying connected peers and transfer rates."""
+    # TODO: This is currently static, maybe right click functionality?
 
     def __init__(self, client):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)

@@ -705,7 +705,7 @@ class TestDetailsTabs(unittest.TestCase):
         status_bar = StatusBar(self.mock_client)
 
         # Check icon name
-        self.assertEqual(status_bar.alt_speed_btn.get_icon_name(), "speedometer-symbolic")
+        self.assertEqual(status_bar.alt_speed_btn.get_icon_name(), "power-profile-performance-symbolic")
 
         # Test initial state
         self.assertFalse(status_bar.alt_speed_btn.get_active())
@@ -745,8 +745,8 @@ class TestDetailsTabs(unittest.TestCase):
         self.assertFalse(hasattr(win, "col_selector_btn"))
         self.assertFalse(hasattr(win, "refresh_btn"))
 
-        # Ensure toggle details button has the bottom pane icon
-        self.assertEqual(win.toggle_details_btn.get_icon_name(), "view-bottom-pane-symbolic")
+        # Ensure toggle details button has the secondary panel icon
+        self.assertEqual(win.toggle_details_btn.get_icon_name(), "sidebar-show-right-symbolic")
 
 
 class TestLocalDaemonAndConfig(unittest.TestCase):

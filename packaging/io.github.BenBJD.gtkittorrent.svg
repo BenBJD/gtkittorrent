@@ -101,14 +101,6 @@
           stroke="url(#ul-arrow)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
   </g>
 
-  <!-- 5. Cute Whiskers (Data signal streaks on cheeks) -->
-  <!-- Left Whiskers -->
-  <path d="M 22,63 L 30,64 M 20,69 L 30,69 M 22,75 L 30,74" 
-        stroke="#ffffff" stroke-opacity="0.75" stroke-width="2.2" stroke-linecap="round" />
-  <!-- Right Whiskers -->
-  <path d="M 106,63 L 98,64 M 108,69 L 98,69 M 106,75 L 98,74" 
-        stroke="#ffffff" stroke-opacity="0.75" stroke-width="2.2" stroke-linecap="round" />
-
   <!-- Subtle cat nose at bottom center -->
   <polygon points="62,72 66,72 64,74" fill="#ff7b72" opacity="0.8" />
 </svg>

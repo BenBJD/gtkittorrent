@@ -90,7 +90,3 @@ class GTKittorrentApp(Adw.Application):
         if not self.win:
             self.win = MainWindow(self, self.client)
         self.win.present()
-
-
-# Backward compatibility alias
-GTKitorrentApp = GTKittorrentApp

@@ -11,7 +11,7 @@ from ...utils.formatters import (
 )
 
 class GeneralTab(Gtk.ScrolledWindow):
-    """General tab showing organized Transfer and Information sections."""
+    """General tab showing organised Transfer and Information sections."""
 
     def __init__(self, client):
         super().__init__(hexpand=True, vexpand=True)

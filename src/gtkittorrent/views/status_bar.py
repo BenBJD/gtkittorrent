@@ -33,7 +33,7 @@ class StatusBar(Gtk.Box):
         self.append(self.lbl_free_space)
 
         # Alternative Speed Limits (Speedometer / Turtle Mode) Button
-        self.alt_speed_btn = Gtk.ToggleButton(icon_name="speedometer-symbolic")
+        self.alt_speed_btn = Gtk.ToggleButton(icon_name="power-profile-performance-symbolic")
         self.alt_speed_btn.add_css_class("flat")
         self.alt_speed_btn.connect("toggled", self._on_alt_speed_toggled)
         self.append(self.alt_speed_btn)

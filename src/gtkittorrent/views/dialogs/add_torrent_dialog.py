@@ -4,7 +4,9 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio
 
 class AddTorrentDialog(Adw.Window):
-    """Full-featured Add Torrent dialog for file or URL/Magnet."""
+    """Add Torrent dialog for file or URL/Magnet."""
+    # TODO: Add ability to change file prioroties before starting
+    # And whatever else is missing.
 
     def __init__(self, parent, client, torrent_file=None, torrent_url=None):
         super().__init__(transient_for=parent, modal=True, title="Add Torrent")

@@ -6,7 +6,7 @@ gi.require_version('Adw', '1')
 from gi.repository import Gtk, GLib, Adw, Gio
 
 class PreferencesDialog(Adw.PreferencesWindow):
-    """Comprehensive preferences dialog matching qBittorrent's options."""
+    """Preferences dialog matching some of qBittorrent's options."""
 
     def __init__(self, parent, settings, client):
         super().__init__(transient_for=parent, modal=True)

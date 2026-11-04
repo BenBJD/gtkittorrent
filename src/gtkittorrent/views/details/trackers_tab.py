@@ -6,6 +6,7 @@ from ...models.tracker import TrackerItem
 
 class TrackersTab(Gtk.Box):
     """Trackers list tab with Add, Edit, Remove, and Reannounce actions."""
+    # TODO: Right click functionality?
 
     def __init__(self, client):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)

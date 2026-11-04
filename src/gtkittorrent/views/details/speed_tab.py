@@ -6,6 +6,7 @@ from ...utils.formatters import format_speed
 
 class SpeedTab(Gtk.Box):
     """Real-time speed graph drawn with Cairo."""
+    # TODO: Mouse over to show speed at a point?
 
     def __init__(self, client):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)

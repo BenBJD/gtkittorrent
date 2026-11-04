@@ -21,7 +21,7 @@ def _choose_icon(candidates):
     return candidates[-1]
 
 class DetailsNotebook(Gtk.Box):
-    """Complete bottom details panel containing all tabs matching qBittorrent."""
+    """Bottom details panel matching qBittorrent."""
 
     def __init__(self, client):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -57,7 +57,7 @@ class DetailsNotebook(Gtk.Box):
         self.speed_tab = SpeedTab(self.client)
         self.stack.add_titled_with_icon(
             self.speed_tab, "speed", "Speed",
-            _choose_icon(["speedometer-symbolic", "network-transmit-receive-symbolic"])
+            _choose_icon(["network-transmit-receive-symbolic", "power-profile-performance-symbolic"])
         )
 
         self.log_tab = LogTab(self.client)

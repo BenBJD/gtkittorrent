@@ -13,5 +13,5 @@ __all__ = [
     'PeersTab',
     'ContentTab',
     'SpeedTab',
-    'logTab'
+    'LogTab'
 ]

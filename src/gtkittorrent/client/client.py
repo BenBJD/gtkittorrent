@@ -2,7 +2,7 @@ import logging
 import qbittorrentapi
 
 class QBittorrentClient:
-    """Enhanced client wrapper around qbittorrent-api with complete Web UI feature coverage."""
+    """Client wrapper around qbittorrent-api"""
 
     def __init__(self, host='http://127.0.0.1:8080', username='admin', password='adminpassword'):
         self.host = host

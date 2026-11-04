@@ -184,8 +184,8 @@ class MainWindow(Adw.Window):
         self.search_entry.connect("search-changed", lambda e: self.torrent_table.set_search_query(e.get_text()))
         self.header.pack_end(self.search_entry)
 
-        # Toggle Details button (bottom panel icon)
-        self.toggle_details_btn = Gtk.Button(icon_name="view-bottom-pane-symbolic", tooltip_text="Toggle Details Panel")
+        # Toggle Details button (secondary panel icon)
+        self.toggle_details_btn = Gtk.Button(icon_name="sidebar-show-right-symbolic", tooltip_text="Toggle Details Panel")
         self.toggle_details_btn.connect("clicked", self._on_toggle_details)
         self.header.pack_end(self.toggle_details_btn)
 
