@@ -13,6 +13,10 @@ _build/
 builddir/
 subprojects/*
 !subprojects/*.wrap
+.flatpak-builder/
+build-dir/
+repo/
+*.flatpak
 eggs/
 .eggs/
 *.egg-info/
