@@ -29,7 +29,7 @@ from gtkittorrent.views.details.content_tab import ContentTab
 from gtkittorrent.views.details.trackers_tab import TrackersTab
 from gtkittorrent.views.details.peers_tab import PeersTab
 from gtkittorrent.views.welcome_window import WelcomeWindow
-from settings import Settings
+from gtkittorrent.settings import Settings
 from gtkittorrent.views.dialogs import (
     AddTorrentDialog,
     PreferencesDialog,
@@ -872,7 +872,7 @@ class TestLocalDaemonAndConfig(unittest.TestCase):
 
     def test_settings_ensure_local_instance(self):
         import tempfile
-        from settings import Settings
+        from gtkittorrent.settings import Settings
         with tempfile.TemporaryDirectory() as tmpdir:
             s = Settings(config_dir=tmpdir)
             self.assertIsNone(s.get_local_instance())
@@ -923,7 +923,7 @@ class TestLocalDaemonAndConfig(unittest.TestCase):
 
     def test_remote_first_does_not_add_local(self):
         import tempfile
-        from settings import Settings
+        from gtkittorrent.settings import Settings
         with tempfile.TemporaryDirectory() as tmpdir:
             settings = Settings(config_dir=tmpdir)
             self.assertEqual(settings.get_instances(), [])
@@ -943,7 +943,7 @@ class TestLocalDaemonAndConfig(unittest.TestCase):
 
     def test_welcome_window_opened_post_setup(self):
         import tempfile
-        from settings import Settings
+        from gtkittorrent.settings import Settings
         with tempfile.TemporaryDirectory() as tmpdir:
             settings = Settings(config_dir=tmpdir)
             settings.set("welcome_completed", True)

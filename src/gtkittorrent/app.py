@@ -2,9 +2,10 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, Gio
-from window import MainWindow, WelcomeWindow
-from client import QBittorrentClient
-from settings import Settings
+from gtkittorrent.views.main_window import MainWindow
+from gtkittorrent.views.welcome_window import WelcomeWindow
+from gtkittorrent.client import QBittorrentClient
+from gtkittorrent.settings import Settings
 
 class GTKittorrentApp(Adw.Application):
     def __init__(self):
@@ -26,12 +27,19 @@ class GTKittorrentApp(Adw.Application):
         import os
         from gi.repository import Gdk
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        icons_dir = os.path.join(base_dir, "data", "icons")
-        if os.path.isdir(icons_dir):
-            display = Gdk.Display.get_default()
-            if display:
-                theme = Gtk.IconTheme.get_for_display(display)
-                theme.add_search_path(icons_dir)
+        possible_icon_dirs = [
+            os.path.join(base_dir, "data", "icons"),
+            os.path.join(os.path.dirname(base_dir), "data", "icons"),
+            os.path.join(os.path.dirname(os.path.dirname(base_dir)), "data", "icons"),
+            "/usr/share/icons",
+            "/usr/local/share/icons",
+        ]
+        display = Gdk.Display.get_default()
+        if display:
+            theme = Gtk.IconTheme.get_for_display(display)
+            for path in possible_icon_dirs:
+                if os.path.isdir(path):
+                    theme.add_search_path(path)
 
     def do_activate(self):
         self.win = self.get_active_window()

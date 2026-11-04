@@ -5,8 +5,8 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Gtk, Adw, GLib
 
-from client import QBittorrentClient
-from window import MainWindow
+from gtkittorrent.client import QBittorrentClient
+from gtkittorrent.views.main_window import MainWindow
 
 class TestGTKittorrent(unittest.TestCase):
     def setUp(self):

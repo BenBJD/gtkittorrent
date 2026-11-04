@@ -27,6 +27,7 @@ env/
 htmlcov/
 .tox/
 .nox/
+.ruff_cache/
 
 # IDE & editor configurations
 .idea/
@@ -34,15 +35,7 @@ htmlcov/
 .junie/
 *.swp
 *.swo
-*~
-
-# Arch Linux packaging artifacts (makepkg)
-packaging/arch/pkg/
-packaging/arch/src/
-*.pkg.tar.zst
-*.pkg.tar.xz
-*.pkg.tar.gz
-*.src.tar.gz
+*
 
 # OS-generated files
 .DS_Store

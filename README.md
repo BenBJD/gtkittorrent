@@ -77,10 +77,16 @@ sudo dnf install python3-gobject gtk4 libadwaita
 
 ## Installation
 
+### Using uv / pip
 ```bash
 git clone https://github.com/BenBJD/gtkittorrent.git
 cd gtkittorrent
-pip install -r requirements.txt
+pip install .
+```
+Or build and install the wheel directly:
+```bash
+uv build
+pip install dist/*.whl
 ```
 
 ## Usage
@@ -89,5 +95,11 @@ pip install -r requirements.txt
 2. Default connection: `http://127.0.0.1:8080` (credentials can be configured in Preferences).
 3. Run GTKittorrent:
 ```bash
+# If installed as a package / wheel
+gtkittorrent
+
+# Or directly from source checkout
 python main.py
+# or
+python -m gtkittorrent
 ```
