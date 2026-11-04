@@ -47,9 +47,15 @@ paru -S gtkittorrent
 ```bash
 # Arch Linux (and derivatives)
 sudo pacman -S python python-gobject libadwaita base-devel meson ninja
-yay -S python-qbittorrent-api # Or paru -S python-qbittorrent-api
+yay -S python-qbittorrent-api # or paru -S python-qbittorrent-api
 
-# TODO: More distros
+# Fedora
+sudo dnf install python3 python3-gobject libadwaita meson ninja-build python3-pip
+pip install --user qbittorrent-api # For Fedora 38+ add --break-system-packages
+
+# Ubuntu / Debian (24.04+)
+sudo apt install python3 python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 meson ninja-build python3-pip
+pip install --user qbittorrent-api # For 23.04+ add --break-system-packages
 ```
 
 #### Build and Install
@@ -75,7 +81,13 @@ For development, `uv` is recommended:
 ```bash
 # Arch (and derivatives)
 sudo pacman -S uv libadwaita base-devel meson ninja
-# TODO: More distros
+
+# Fedora
+sudo dnf install uv libadwaita meson ninja-build
+
+# Ubuntu / Debian (24.04+)
+sudo apt install libadwaita-1-dev gir1.2-adw-1 meson ninja-build
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ### Setup & Running
