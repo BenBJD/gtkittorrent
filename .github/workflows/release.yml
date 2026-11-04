@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.1.3 or v0.1.3)'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Update version numbers
+        id: bump
+        run: |
+          RAW_VER="${{ inputs.version }}"
+          VERSION="${RAW_VER#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "TAG=v$VERSION" >> "$GITHUB_OUTPUT"
+
+          python3 - <<EOF
+          import re
+          import datetime
+
+          version = "$VERSION"
+          date = datetime.date.today().isoformat()
+
+          # 1. pyproject.toml
+          with open("pyproject.toml", "r") as f:
+              content = f.read()
+          content = re.sub(r'version = "[^"]+"', f'version = "{version}"', content, count=1)
+          with open("pyproject.toml", "w") as f:
+              f.write(content)
+
+          # 2. meson.build
+          with open("meson.build", "r") as f:
+              content = f.read()
+          content = re.sub(r"version: '[^']+'", f"version: '{version}'", content, count=1)
+          with open("meson.build", "w") as f:
+              f.write(content)
+
+          # 3. data/io.github.BenBJD.gtkittorrent.metainfo.xml
+          with open("data/io.github.BenBJD.gtkittorrent.metainfo.xml", "r") as f:
+              content = f.read()
+          if f'version="{version}"' in content:
+              content = re.sub(rf'<release version="{version}" date="[^"]*"/>', f'<release version="{version}" date="{date}"/>', content)
+          else:
+              content = re.sub(r'<releases>', f'<releases>\n    <release version="{version}" date="{date}"/>', content, count=1)
+          with open("data/io.github.BenBJD.gtkittorrent.metainfo.xml", "w") as f:
+              f.write(content)
+          EOF
+
+      - name: Commit and tag new release
+        run: |
+          VERSION="${{ steps.bump.outputs.VERSION }}"
+          TAG="${{ steps.bump.outputs.TAG }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add pyproject.toml meson.build data/io.github.BenBJD.gtkittorrent.metainfo.xml
+          git commit -m "chore: release $TAG"
+          git tag "$TAG"
+
+          git push origin main
+          git push origin "$TAG"
+
+      - name: Create release tarball & checksum
+        run: |
+          VERSION="${{ steps.bump.outputs.VERSION }}"
+          TAG="${{ steps.bump.outputs.TAG }}"
+          ARCHIVE_NAME="gtkittorrent-$VERSION.tar.gz"
+
+          # Create clean archive from git tag
+          git archive --format=tar.gz --prefix="gtkittorrent-$VERSION/" "$TAG" > "$ARCHIVE_NAME"
+          sha256sum "$ARCHIVE_NAME" > "${ARCHIVE_NAME}.sha256"
+
+          echo "TARBALL_SHA=$(awk '{print $1}' ${ARCHIVE_NAME}.sha256)" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.TAG }}
+          name: ${{ steps.bump.outputs.TAG }}
+          files: |
+            gtkittorrent-${{ steps.bump.outputs.VERSION }}.tar.gz
+            gtkittorrent-${{ steps.bump.outputs.VERSION }}.tar.gz.sha256
+          body: |
+            ### Release ${{ steps.bump.outputs.TAG }}
+
+            #### Checksums (for packagers):
+            - `gtkittorrent-${{ steps.bump.outputs.VERSION }}.tar.gz`: `${{ env.TARBALL_SHA }}`
+          generate_release_notes: true

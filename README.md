@@ -1,4 +1,4 @@
-<img src="packaging/io.github.BenBJD.gtkittorrent.svg" width="128" height="128" alt="GTKittorrent Logo">
+<img src="data/icons/hicolor/scalable/apps/io.github.BenBJD.gtkittorrent.svg" width="128" height="128" alt="GTKittorrent Logo">
 
 # GTKittorrent
 
@@ -40,13 +40,41 @@ paru -S gtkittorrent
 # TODO: This
 ```
 
-## Contributing and Local Deployment
+### From Source
 
-#### Prerequisites:
+#### Dependencies
+
+```bash
+# Arch Linux (and derivatives)
+sudo pacman -S python python-gobject libadwaita base-devel meson ninja
+yay -S python-qbittorrent-api # Or paru -S python-qbittorrent-api
+
+# TODO: More distros
+```
+
+#### Build and Install
+
+```bash
+git clone https://github.com/BenBJD/gtkittorrent.git
+cd gtkittorrent
+
+# Configure build directory
+meson setup build --prefix=/usr
+
+# Compile and install system-wide
+meson compile -C build
+sudo meson install -C build
+```
+
+## Contributing
+
+For development, `uv` is recommended:
+
+### Prerequisites:
 
 ```bash
 # Arch (and derivatives)
-sudo pacman -S uv gtk4 libadwaita base-devel
+sudo pacman -S uv libadwaita base-devel meson ninja
 # TODO: More distros
 ```
 
@@ -58,4 +86,15 @@ cd gtkittorrent
 
 uv sync
 uv run gtkittorrent
+```
+
+### Running Tests
+
+```bash
+# Run unit tests via pytest
+uv run pytest
+
+# Or run full test suite with Meson
+meson setup build
+meson test -C build --print-errorlogs
 ```

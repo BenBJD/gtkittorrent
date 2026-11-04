@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.BenBJD.gtkittorrent</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>GTKittorrent</name>
+  <summary>Modern GTK4 and Libadwaita frontend for qBittorrent</summary>
+  <description>
+    <p>
+      GTKittorrent is a modern, full-featured GTK4 and Libadwaita frontend for qBittorrent,
+      designed to achieve feature parity with qBittorrent's official Qt desktop UI while
+      following GNOME design conventions.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Support for multiple instances, including automatic setup for local qbittorrent-nox or qbittorrent</li>
+      <li>Full torrent management, downloading, and bandwidth control</li>
+      <li>Detailed torrent inspection: logs, trackers, peers, and file selection</li>
+      <li>Clean and adaptive interface using Libadwaita</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.BenBJD.gtkittorrent.desktop</launchable>
+  <url type="homepage">https://github.com/BenBJD/gtkittorrent</url>
+  <url type="bugtracker">https://github.com/BenBJD/gtkittorrent/issues</url>
+  <developer>
+    <name>Ben Davison</name>
+  </developer>
+  <provides>
+    <binary>gtkittorrent</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.2" date="2026-11-04"/>
+  </releases>
+</component>

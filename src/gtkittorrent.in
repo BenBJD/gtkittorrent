@@ -1,0 +1,13 @@
+#!@PYTHON@
+
+import os
+import sys
+
+# Ensure the installed module path is in sys.path if installed to a custom prefix or flatpak
+pythondir = '@PYTHON_DIR@'
+if pythondir and pythondir not in sys.path:
+    sys.path.insert(0, pythondir)
+
+if __name__ == '__main__':
+    from gtkittorrent.main import main
+    sys.exit(main())

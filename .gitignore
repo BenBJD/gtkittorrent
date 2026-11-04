@@ -9,6 +9,10 @@ __pycache__/
 # Distribution / packaging
 dist/
 build/
+_build/
+builddir/
+subprojects/*
+!subprojects/*.wrap
 eggs/
 .eggs/
 *.egg-info/

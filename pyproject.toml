@@ -1,6 +1,6 @@
 [project]
 name = "gtkittorrent"
-version = "0.1.0"
+version = "0.1.2"
 description = "Modern GTK4 and Libadwaita frontend for qBittorrent"
 readme = "README.md"
 authors = [
