@@ -3,6 +3,18 @@ import os
 import uuid
 from gi.repository import GLib
 
+def apply_theme(theme):
+    """Apply 'system', 'light' or 'dark' via libadwaita's style manager."""
+    import gi
+    gi.require_version('Adw', '1')
+    from gi.repository import Adw
+    scheme = {
+        "light": Adw.ColorScheme.FORCE_LIGHT,
+        "dark": Adw.ColorScheme.FORCE_DARK,
+    }.get(theme, Adw.ColorScheme.DEFAULT)
+    Adw.StyleManager.get_default().set_color_scheme(scheme)
+
+
 class Settings:
     def __init__(self, config_dir=None):
         if config_dir:
@@ -25,6 +37,7 @@ class Settings:
             "use_https": False,
             "username": "admin",
             "password": "adminpassword",
+            "theme": "system",
             "configured": False,
             "welcome_completed": False,
             "current_instance_id": "default",

@@ -3,7 +3,7 @@ import time
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, GLib, Adw, Gio
+from gi.repository import Gtk, GLib, Adw, Gio, Gdk
 
 class PreferencesDialog(Adw.PreferencesWindow):
     """Preferences dialog matching some of qBittorrent's options."""
@@ -16,16 +16,19 @@ class PreferencesDialog(Adw.PreferencesWindow):
         self.client = client
         self.qb_prefs = self.client.get_app_preferences() if self.client else {}
 
-        self._setup_connection_page()
+        self._setup_behaviour_page()
         self._setup_downloads_page()
+        self._setup_connection_page()
         self._setup_speed_page()
         self._setup_bittorrent_page()
 
         self.connect("close-request", self._on_close)
 
-    def _setup_connection_page(self):
-        page = Adw.PreferencesPage(title="Connection", icon_name="network-workgroup-symbolic")
+    def _setup_behaviour_page(self):
+        page = Adw.PreferencesPage(title="Behaviour", icon_name="preferences-system-symbolic")
         self.add(page)
+
+        self._setup_theme_group(page)
 
         group = Adw.PreferencesGroup(title="qBittorrent Web UI Server")
         page.add(group)
@@ -202,8 +205,133 @@ class PreferencesDialog(Adw.PreferencesWindow):
             else:
                 self._check_engine_status()
 
+    @staticmethod
+    def _clamp(value, lo, hi):
+        try:
+            return max(lo, min(hi, int(value)))
+        except (TypeError, ValueError):
+            return lo
+
+    def _switch_row(self, group, title, active, subtitle=None):
+        row = Adw.ActionRow(title=title)
+        if subtitle:
+            row.set_subtitle(subtitle)
+        switch = Gtk.Switch(active=bool(active), valign=Gtk.Align.CENTER)
+        row.add_suffix(switch)
+        row.set_activatable_widget(switch)
+        group.add(row)
+        return row, switch
+
+    def _spin_row(self, group, title, value, lower, upper, step=1, subtitle=None):
+        row = Adw.SpinRow(
+            title=title,
+            adjustment=Gtk.Adjustment(lower=lower, upper=upper, step_increment=step, page_increment=step * 10)
+        )
+        if subtitle:
+            row.set_subtitle(subtitle)
+        row.set_value(value)
+        group.add(row)
+        return row
+
+    def _is_qbt5(self):
+        """qBittorrent 5.x renamed several preference keys."""
+        return "add_stopped_enabled" in self.qb_prefs or "category_changed_tmm_enabled" in self.qb_prefs
+
+    _THEME_CSS = b"""
+    checkbutton.theme-selector {
+        padding: 0;
+        min-height: 44px;
+        min-width: 44px;
+        padding: 1px;
+        background-clip: content-box;
+        border-radius: 9999px;
+        box-shadow: inset 0 0 0 1px @borders;
+    }
+    checkbutton.theme-selector:checked {
+        box-shadow: inset 0 0 0 2px @accent_bg_color;
+    }
+    checkbutton.theme-selector radio {
+        -gtk-icon-source: none;
+        border: none;
+        background: none;
+        box-shadow: none;
+        min-width: 12px;
+        min-height: 12px;
+        transform: translate(27px, 14px);
+        padding: 2px;
+    }
+    checkbutton.theme-selector radio:checked {
+        -gtk-icon-source: -gtk-icontheme("object-select-symbolic");
+        background-color: @accent_bg_color;
+        color: @accent_fg_color;
+    }
+    checkbutton.theme-selector.follow {
+        background-image: linear-gradient(to bottom right, #ffffff 49.99%, #202020 50.01%);
+    }
+    checkbutton.theme-selector.light {
+        background-color: #ffffff;
+    }
+    checkbutton.theme-selector.dark {
+        background-color: #202020;
+    }
+    """
+
+    def _setup_theme_group(self, page):
+        display = Gdk.Display.get_default()
+        if display:
+            provider = Gtk.CssProvider()
+            provider.load_from_data(self._THEME_CSS)
+            Gtk.StyleContext.add_provider_for_display(
+                display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            )
+
+        group = Adw.PreferencesGroup(title="Appearance")
+        page.add(group)
+
+        row = Adw.ActionRow(title="Style", subtitle="Choose between system, light and dark appearance")
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, valign=Gtk.Align.CENTER)
+        row.add_suffix(box)
+
+        current = self.settings.get("theme", "system") if self.settings else "system"
+        self.theme_buttons = {}
+        group_btn = None
+        for key, css, tip in (
+            ("system", "follow", "Follow System Style"),
+            ("light", "light", "Light Style"),
+            ("dark", "dark", "Dark Style"),
+        ):
+            btn = Gtk.CheckButton(tooltip_text=tip, css_classes=["theme-selector", css])
+            if group_btn is None:
+                group_btn = btn
+            else:
+                btn.set_group(group_btn)
+            btn.set_active(key == current)
+            btn.connect("toggled", self._on_theme_toggled, key)
+            box.append(btn)
+            self.theme_buttons[key] = btn
+        group.add(row)
+
+    def _on_theme_toggled(self, btn, key):
+        if not btn.get_active():
+            return
+        if self.settings:
+            self.settings.set("theme", key)
+        from ...settings import apply_theme
+        apply_theme(key)
+
+    def _setup_connection_page(self):
+        page = Adw.PreferencesPage(title="Connection", icon_name="network-workgroup-symbolic")
+        self.add(page)
+
         conn_group = Adw.PreferencesGroup(title="Listening Port &amp; Limits")
         page.add(conn_group)
+
+        self.protocol_row = Adw.ComboRow(
+            title="Peer Connection Protocol",
+            model=Gtk.StringList.new(["TCP and μTP", "TCP", "μTP"])
+        )
+        self.protocol_row.set_selected(self._clamp(self.qb_prefs.get("bittorrent_protocol", 0), 0, 2))
+        conn_group.add(self.protocol_row)
 
         self.listen_port_row = Adw.SpinRow(
             title="Peer Listening Port",
@@ -217,12 +345,26 @@ class PreferencesDialog(Adw.PreferencesWindow):
         self.upnp_row.add_suffix(self.upnp_switch)
         conn_group.add(self.upnp_row)
 
-        self.max_connec_row = Adw.SpinRow(
-            title="Global Maximum Connections",
-            adjustment=Gtk.Adjustment(lower=0, upper=5000, step_increment=10, page_increment=50)
+        limits_group = Adw.PreferencesGroup(
+            title="Connection Limits",
+            description="Use 0 for unlimited."
         )
-        self.max_connec_row.set_value(self.qb_prefs.get("max_connec", 500))
-        conn_group.add(self.max_connec_row)
+        page.add(limits_group)
+
+        def spin(title, key, default, upper=65535):
+            row = Adw.SpinRow(
+                title=title,
+                adjustment=Gtk.Adjustment(lower=0, upper=upper, step_increment=1, page_increment=10)
+            )
+            val = self.qb_prefs.get(key, default)
+            row.set_value(val if isinstance(val, (int, float)) and val > 0 else 0)
+            limits_group.add(row)
+            return row
+
+        self.max_connec_row = spin("Global Maximum Connections", "max_connec", 500)
+        self.max_connec_per_torrent_row = spin("Maximum Connections per Torrent", "max_connec_per_torrent", 100)
+        self.max_uploads_row = spin("Global Maximum Upload Slots", "max_uploads", 20)
+        self.max_uploads_per_torrent_row = spin("Maximum Upload Slots per Torrent", "max_uploads_per_torrent", 4)
 
     def _setup_downloads_page(self):
         page = Adw.PreferencesPage(title="Downloads", icon_name="folder-download-symbolic")
@@ -273,6 +415,64 @@ class PreferencesDialog(Adw.PreferencesWindow):
         # Grey out incomplete files location if separate incomplete location is not checked
         self.temp_path_switch.connect("notify::active", self._on_temp_path_toggled)
         self._on_temp_path_toggled(self.temp_path_switch)
+
+        add_group = Adw.PreferencesGroup(title="When Adding a Torrent")
+        page.add(add_group)
+
+        self.content_layout_row = Adw.ComboRow(
+            title="Torrent Content Layout",
+            model=Gtk.StringList.new(["Original", "Create subfolder", "Don't create subfolder"])
+        )
+        self.CONTENT_LAYOUTS = ["Original", "Subfolder", "NoSubfolder"]
+        layout = self.qb_prefs.get("torrent_content_layout", "Original")
+        self.content_layout_row.set_selected(
+            self.CONTENT_LAYOUTS.index(layout) if layout in self.CONTENT_LAYOUTS else 0
+        )
+        add_group.add(self.content_layout_row)
+
+        _, self.add_top_switch = self._switch_row(
+            add_group, "Add to top of queue", self.qb_prefs.get("add_to_top_of_queue", False))
+        stopped = self.qb_prefs.get("add_stopped_enabled", self.qb_prefs.get("start_paused_enabled", False))
+        _, self.add_stopped_switch = self._switch_row(
+            add_group, "Do not start the download automatically", stopped)
+
+        tmm_group = Adw.PreferencesGroup(title="Saving Management")
+        page.add(tmm_group)
+
+        self.tmm_mode_row = Adw.ComboRow(
+            title="Default Torrent Management Mode",
+            model=Gtk.StringList.new(["Manual", "Automatic"])
+        )
+        self.tmm_mode_row.set_selected(1 if self.qb_prefs.get("auto_tmm_enabled", False) else 0)
+        tmm_group.add(self.tmm_mode_row)
+
+        self.CATEGORY_CHANGED_OPTIONS = ["Switch affected torrents to Manual Mode", "Relocate affected torrents"]
+        self.category_changed_row = Adw.ComboRow(
+            title="When Torrent Category Changed",
+            model=Gtk.StringList.new(self.CATEGORY_CHANGED_OPTIONS)
+        )
+        relocate = self.qb_prefs.get("category_changed_tmm_enabled", self.qb_prefs.get("torrent_changed_tmm_enabled", True))
+        self.category_changed_row.set_selected(1 if relocate else 0)
+        tmm_group.add(self.category_changed_row)
+
+        excl_group = Adw.PreferencesGroup(
+            title="Excluded File Names",
+            description="Files matching these patterns are not downloaded. One glob per line, e.g. *.exe or sample?.mkv"
+        )
+        page.add(excl_group)
+
+        _, self.excluded_switch = self._switch_row(
+            excl_group, "Enable excluded file names", self.qb_prefs.get("excluded_file_names_enabled", False))
+        self.excluded_view = Gtk.TextView(
+            wrap_mode=Gtk.WrapMode.NONE, monospace=True, top_margin=8, bottom_margin=8,
+            left_margin=8, right_margin=8
+        )
+        self.excluded_view.get_buffer().set_text(self.qb_prefs.get("excluded_file_names", "") or "")
+        scroller = Gtk.ScrolledWindow(min_content_height=110, css_classes=["card"])
+        scroller.set_child(self.excluded_view)
+        excl_group.add(scroller)
+        self.excluded_switch.connect("notify::active", lambda sw, *a: scroller.set_sensitive(sw.get_active()))
+        scroller.set_sensitive(self.excluded_switch.get_active())
 
         disk_group = Adw.PreferencesGroup(title="File Management")
         page.add(disk_group)
@@ -329,6 +529,61 @@ class PreferencesDialog(Adw.PreferencesWindow):
         self.alt_up_limit_row.set_value(alt_up / 1024 if alt_up > 0 else 0)
         alt_group.add(self.alt_up_limit_row)
 
+        sched_group = Adw.PreferencesGroup(title="Scheduler")
+        page.add(sched_group)
+
+        _, self.scheduler_switch = self._switch_row(
+            sched_group, "Schedule the use of alternative rate limits",
+            self.qb_prefs.get("scheduler_enabled", False))
+
+        self.sched_from_row = self._time_row(
+            sched_group, "From",
+            self.qb_prefs.get("schedule_from_hour", 0), self.qb_prefs.get("schedule_from_min", 0))
+        self.sched_to_row = self._time_row(
+            sched_group, "To",
+            self.qb_prefs.get("schedule_to_hour", 0), self.qb_prefs.get("schedule_to_min", 0))
+
+        self.sched_days_row = Adw.ComboRow(
+            title="When",
+            model=Gtk.StringList.new([
+                "Every day", "Weekdays", "Weekends", "Monday", "Tuesday",
+                "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+            ])
+        )
+        self.sched_days_row.set_selected(self._clamp(self.qb_prefs.get("scheduler_days", 0), 0, 9))
+        sched_group.add(self.sched_days_row)
+
+        def update_sched(*_):
+            on = self.scheduler_switch.get_active()
+            for r in (self.sched_from_row, self.sched_to_row, self.sched_days_row):
+                r.set_sensitive(on)
+        self.scheduler_switch.connect("notify::active", update_sched)
+        update_sched()
+
+    def _time_row(self, group, title, hour, minute):
+        """Row with hour and minute spin buttons. Returns the row with .hour/.minute spins attached."""
+        row = Adw.ActionRow(title=title)
+        hour_spin = Gtk.SpinButton(
+            adjustment=Gtk.Adjustment(lower=0, upper=23, step_increment=1, page_increment=6),
+            valign=Gtk.Align.CENTER, orientation=Gtk.Orientation.HORIZONTAL, width_chars=2
+        )
+        min_spin = Gtk.SpinButton(
+            adjustment=Gtk.Adjustment(lower=0, upper=59, step_increment=1, page_increment=10),
+            valign=Gtk.Align.CENTER, width_chars=2
+        )
+        hour_spin.set_value(self._clamp(hour, 0, 23))
+        min_spin.set_value(self._clamp(minute, 0, 59))
+        for sp_ in (hour_spin, min_spin):
+            sp_.set_numeric(True)
+            sp_.connect("output", lambda w: (w.set_text(f"{int(w.get_value()):02d}"), True)[1])
+        row.add_suffix(hour_spin)
+        row.add_suffix(Gtk.Label(label=":"))
+        row.add_suffix(min_spin)
+        row.hour_spin = hour_spin
+        row.min_spin = min_spin
+        group.add(row)
+        return row
+
     def _setup_bittorrent_page(self):
         page = Adw.PreferencesPage(title="BitTorrent", icon_name="system-run-symbolic")
         self.add(page)
@@ -350,6 +605,98 @@ class PreferencesDialog(Adw.PreferencesWindow):
         self.lsd_switch = Gtk.Switch(active=bool(self.qb_prefs.get("lsd", True)), valign=Gtk.Align.CENTER)
         self.lsd_row.add_suffix(self.lsd_switch)
         privacy_group.add(self.lsd_row)
+
+        self.encryption_row = Adw.ComboRow(
+            title="Encryption Mode",
+            model=Gtk.StringList.new(["Allow encryption", "Require encryption", "Disable encryption"])
+        )
+        self.encryption_row.set_selected(self._clamp(self.qb_prefs.get("encryption", 0), 0, 2))
+        privacy_group.add(self.encryption_row)
+
+        _, self.anonymous_switch = self._switch_row(
+            privacy_group, "Enable anonymous mode",
+            self.qb_prefs.get("anonymous_mode", False),
+            "Hides client identification from peers and trackers")
+
+        limits_group = Adw.PreferencesGroup(title="Seeding Limits")
+        page.add(limits_group)
+
+        _, self.ratio_switch = self._switch_row(
+            limits_group, "Share ratio limit", self.qb_prefs.get("max_ratio_enabled", False))
+        ratio = self.qb_prefs.get("max_ratio", 1.0)
+        self.ratio_row = Adw.SpinRow(
+            title="When ratio reaches",
+            adjustment=Gtk.Adjustment(lower=0, upper=9999, step_increment=0.05, page_increment=1),
+            digits=2
+        )
+        self.ratio_row.set_value(ratio if isinstance(ratio, (int, float)) and ratio >= 0 else 1.0)
+        limits_group.add(self.ratio_row)
+
+        _, self.seed_time_switch = self._switch_row(
+            limits_group, "Seeding time limit", self.qb_prefs.get("max_seeding_time_enabled", False))
+        self.seed_time_row = self._spin_row(
+            limits_group, "When seeding time reaches (minutes)",
+            max(0, self.qb_prefs.get("max_seeding_time", 1440) or 0), 0, 525600, 10)
+
+        _, self.inactive_time_switch = self._switch_row(
+            limits_group, "Inactive seeding time limit",
+            self.qb_prefs.get("max_inactive_seeding_time_enabled", False))
+        self.inactive_time_row = self._spin_row(
+            limits_group, "When inactive seeding time reaches (minutes)",
+            max(0, self.qb_prefs.get("max_inactive_seeding_time", 1440) or 0), 0, 525600, 10)
+
+        for sw, row in (
+            (self.ratio_switch, self.ratio_row),
+            (self.seed_time_switch, self.seed_time_row),
+            (self.inactive_time_switch, self.inactive_time_row),
+        ):
+            sw.connect("notify::active", lambda s, *a, r=row: r.set_sensitive(s.get_active()))
+            row.set_sensitive(sw.get_active())
+
+        self.share_mode_row = Adw.ComboRow(
+            title="Limit applies when",
+            model=Gtk.StringList.new(["Any of the above is reached", "All of the above are reached"])
+        )
+        mode = self.qb_prefs.get("share_limits_mode", 0)
+        self.share_mode_row.set_selected(1 if mode in (1, "MatchAll") else 0)
+        self.share_mode_row.set_visible(not self.qb_prefs or "share_limits_mode" in self.qb_prefs)
+        limits_group.add(self.share_mode_row)
+
+        # max_ratio_act values differ between qBittorrent 4.x and 5.x
+        if self._is_qbt5():
+            self.SHARE_ACTIONS = [("Stop torrent", 0), ("Remove torrent", 1),
+                                  ("Remove torrent and its files", 3), ("Enable super seeding", 2)]
+        else:
+            self.SHARE_ACTIONS = [("Pause torrent", 0), ("Remove torrent", 1),
+                                  ("Remove torrent and its files", 3), ("Enable super seeding", 2)]
+        self.share_action_row = Adw.ComboRow(
+            title="Then",
+            model=Gtk.StringList.new([n for n, _ in self.SHARE_ACTIONS])
+        )
+        cur_act = self.qb_prefs.get("max_ratio_act", 0)
+        for i, (_, v) in enumerate(self.SHARE_ACTIONS):
+            if v == cur_act:
+                self.share_action_row.set_selected(i)
+        limits_group.add(self.share_action_row)
+
+        trackers_group = Adw.PreferencesGroup(
+            title="Trackers",
+        )
+        page.add(trackers_group)
+        _, self.add_trackers_switch = self._switch_row(
+            trackers_group, "Automatically append these trackers to new downloads",
+            self.qb_prefs.get("add_trackers_enabled", False))
+        self.add_trackers_view = Gtk.TextView(
+            wrap_mode=Gtk.WrapMode.NONE, monospace=True, top_margin=8, bottom_margin=8,
+            left_margin=8, right_margin=8
+        )
+        self.add_trackers_view.get_buffer().set_text(self.qb_prefs.get("add_trackers", "") or "")
+        trk_scroller = Gtk.ScrolledWindow(min_content_height=110, css_classes=["card"])
+        trk_scroller.set_child(self.add_trackers_view)
+        trackers_group.add(trk_scroller)
+        trackers_group.set_description("One tracker URL per line.")
+        self.add_trackers_switch.connect("notify::active", lambda sw, *a: trk_scroller.set_sensitive(sw.get_active()))
+        trk_scroller.set_sensitive(self.add_trackers_switch.get_active())
 
         queue_group = Adw.PreferencesGroup(title="Torrent Queueing")
         page.add(queue_group)
@@ -612,4 +959,47 @@ class PreferencesDialog(Adw.PreferencesWindow):
                 "max_active_uploads": int(self.max_active_up_row.get_value()),
                 "max_active_torrents": int(self.max_active_torrents_row.get_value()),
             }
+            def text_of(view):
+                buf = view.get_buffer()
+                return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False).strip()
+
+            q5 = self._is_qbt5()
+            new_qb_prefs.update({
+                "bittorrent_protocol": self.protocol_row.get_selected(),
+                "max_connec_per_torrent": int(self.max_connec_per_torrent_row.get_value()) or -1,
+                "max_uploads": int(self.max_uploads_row.get_value()) or -1,
+                "max_uploads_per_torrent": int(self.max_uploads_per_torrent_row.get_value()) or -1,
+                "torrent_content_layout": self.CONTENT_LAYOUTS[self.content_layout_row.get_selected()],
+                "add_to_top_of_queue": self.add_top_switch.get_active(),
+                "auto_tmm_enabled": self.tmm_mode_row.get_selected() == 1,
+                "excluded_file_names_enabled": self.excluded_switch.get_active(),
+                "excluded_file_names": text_of(self.excluded_view),
+                "scheduler_enabled": self.scheduler_switch.get_active(),
+                "schedule_from_hour": int(self.sched_from_row.hour_spin.get_value()),
+                "schedule_from_min": int(self.sched_from_row.min_spin.get_value()),
+                "schedule_to_hour": int(self.sched_to_row.hour_spin.get_value()),
+                "schedule_to_min": int(self.sched_to_row.min_spin.get_value()),
+                "scheduler_days": self.sched_days_row.get_selected(),
+                "encryption": self.encryption_row.get_selected(),
+                "anonymous_mode": self.anonymous_switch.get_active(),
+                "max_ratio_enabled": self.ratio_switch.get_active(),
+                "max_ratio": self.ratio_row.get_value(),
+                "max_seeding_time_enabled": self.seed_time_switch.get_active(),
+                "max_seeding_time": int(self.seed_time_row.get_value()),
+                "max_inactive_seeding_time_enabled": self.inactive_time_switch.get_active(),
+                "max_inactive_seeding_time": int(self.inactive_time_row.get_value()),
+                "max_ratio_act": self.SHARE_ACTIONS[self.share_action_row.get_selected()][1],
+                "add_trackers_enabled": self.add_trackers_switch.get_active(),
+                "add_trackers": text_of(self.add_trackers_view),
+            })
+            relocate = self.category_changed_row.get_selected() == 1
+            stopped = self.add_stopped_switch.get_active()
+            if q5 or not self.qb_prefs:
+                new_qb_prefs["add_stopped_enabled"] = stopped
+                new_qb_prefs["category_changed_tmm_enabled"] = relocate
+            if not q5:
+                new_qb_prefs["start_paused_enabled"] = stopped
+                new_qb_prefs["torrent_changed_tmm_enabled"] = relocate
+            if self.share_mode_row.get_visible():
+                new_qb_prefs["share_limits_mode"] = self.share_mode_row.get_selected()
             self.client.set_app_preferences(new_qb_prefs)

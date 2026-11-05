@@ -26,6 +26,8 @@ class GTKittorrentApp(Adw.Application):
         Adw.Application.do_startup(self)
         import os
         from gi.repository import Gdk
+        from gtkittorrent.settings import apply_theme
+        apply_theme(self.settings.get("theme", "system"))
         base_dir = os.path.dirname(os.path.abspath(__file__))
         possible_icon_dirs = [
             os.path.join(base_dir, "data", "icons"),
