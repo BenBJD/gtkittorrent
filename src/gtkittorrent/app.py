@@ -57,7 +57,9 @@ class GTKittorrentApp(Adw.Application):
         self.win.start_initial_connection()
 
     def do_shutdown(self):
-        if self.settings.get("engine_stop_on_exit", False):
+        is_local = self.settings.is_current_local() if hasattr(self.settings, "is_current_local") else True
+        is_flatpak = self.settings.is_flatpak() if hasattr(self.settings, "is_flatpak") else False
+        if self.settings.get("engine_stop_on_exit", False) and is_local and not is_flatpak:
             from gtkittorrent.client.daemon import LocalDaemonManager
             LocalDaemonManager.get_instance().stop_daemon(self.client)
         Adw.Application.do_shutdown(self)
@@ -81,9 +83,14 @@ class GTKittorrentApp(Adw.Application):
                 add_dlg = AddTorrentDialog(self.win, self.client, torrent_url=uri)
                 add_dlg.present()
 
+    def _on_welcome_connected(self):
+        self._show_main_window()
+        if self.win and hasattr(self.win, "start_initial_connection"):
+            self.win.start_initial_connection()
+
     def _show_welcome_screen(self, is_reconnect=False):
         self.welcome_win = WelcomeWindow(self, self.settings, self.client, is_reconnect=is_reconnect)
-        self.welcome_win.connect("connected", lambda w: self._show_main_window())
+        self.welcome_win.connect("connected", lambda w: self._on_welcome_connected())
         self.welcome_win.present()
 
     def _show_main_window(self):

@@ -308,12 +308,12 @@ class WelcomeWindow(Adw.Window):
         self.local_port_entry.set_text(default_port)
         self.local_expander.add_row(self.local_port_entry)
 
-        default_user = (self.settings.get("username") if self.settings else "admin") or "admin"
+        default_user = str((self.settings.get("username") if self.settings else "admin") or "admin")
         self.local_username_entry = Adw.EntryRow(title="Username")
         self.local_username_entry.set_text(default_user)
         self.local_expander.add_row(self.local_username_entry)
 
-        default_pass = (self.settings.get("password") if self.settings else "") or ""
+        default_pass = str((self.settings.get("password") if self.settings else "") or "")
         self.local_password_entry = Adw.PasswordEntryRow(title="Password")
         self.local_password_entry.set_text(default_pass)
         self.local_expander.add_row(self.local_password_entry)
@@ -622,6 +622,8 @@ class WelcomeWindow(Adw.Window):
         if success:
             if self.settings and hasattr(self.settings, "add_instance"):
                 self.settings.add_instance(name, host_ip, port, username, password, use_https=use_https, local=False, make_active=True)
+            if self.client:
+                self.client.update_settings(full_host, username, password)
             self.configured_count += 1
 
             if finish_after:
@@ -648,6 +650,16 @@ class WelcomeWindow(Adw.Window):
         if self.settings:
             self.settings.set("welcome_completed", True)
             self.settings.set("configured", True)
+            if hasattr(self.settings, "get_current_instance"):
+                curr = self.settings.get_current_instance()
+                if isinstance(curr, dict) and self.client:
+                    protocol = "https" if curr.get("use_https") else "http"
+                    full_host = curr.get("host") or f"{protocol}://{curr.get('host_ip', '127.0.0.1')}:{curr.get('port', '8080')}"
+                    self.client.update_settings(
+                        full_host,
+                        curr.get("username", "admin"),
+                        curr.get("password", "")
+                    )
 
         if self.client:
             self.client.connect()

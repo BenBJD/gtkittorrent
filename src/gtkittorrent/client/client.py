@@ -95,6 +95,8 @@ class QBittorrentClient:
 
     # Torrent Information
     def get_torrents(self, filter_name=None, category=None, tag=None, sort=None, reverse=False):
+        if not self.is_connected():
+            return []
         try:
             kwargs = {}
             if filter_name:

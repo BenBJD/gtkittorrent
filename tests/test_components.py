@@ -1042,6 +1042,21 @@ class TestLocalDaemonAndConfig(unittest.TestCase):
             self.assertFalse(res)
             self.assertIsNone(welcome._status_timer_id)
 
+    def test_welcome_window_remote_setup_updates_client(self):
+        mock_settings = MagicMock()
+        mock_settings.get.side_effect = lambda k, d=None: "admin" if "user" in k else "8080"
+        mock_settings.get_instances.return_value = []
+        mock_client = MagicMock()
+
+        welcome = WelcomeWindow(None, mock_settings, mock_client, is_reconnect=False)
+        welcome._on_remote_save_result(
+            True, "Connected", "My Seedbox", "192.168.1.50", "8080",
+            "remoteuser", "remotepass", False, "http://192.168.1.50:8080", finish_after=True
+        )
+
+        mock_client.update_settings.assert_called_with("http://192.168.1.50:8080", "remoteuser", "remotepass")
+        mock_client.connect.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

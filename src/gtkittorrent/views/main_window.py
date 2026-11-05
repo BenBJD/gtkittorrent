@@ -27,6 +27,15 @@ class MainWindow(Adw.Window):
         self.sync_rid = 0
         self.items_by_hash = {}
 
+        # Ensure client is configured with active instance parameters
+        curr_inst = self._get_current_instance_safe()
+        protocol = "https" if curr_inst.get("use_https") else "http"
+        full_host = curr_inst.get("host") or f"{protocol}://{curr_inst.get('host_ip', '127.0.0.1')}:{curr_inst.get('port', '8080')}"
+        username = curr_inst.get("username", "admin")
+        password = curr_inst.get("password", "")
+        if hasattr(self.client, "update_settings"):
+            self.client.update_settings(full_host, username, password)
+
         self.set_default_size(1024, 768)
 
         # Toast Overlay
@@ -214,6 +223,12 @@ class MainWindow(Adw.Window):
             try:
                 Gio.AppInfo.launch_default_for_uri(uri, None)
             except Exception as e:
+                toast_string = f"Failed to open folder: {save_path}."
+                if self._is_flatpak():
+                    toast_string += " Check Flatpak permissions."
+                if not self._is_current_local():
+                    toast_string += " Folder might be remote?"
+                self.show_toast(toast_string)
                 print(f"Failed to open folder: {e}")
 
     def _on_add_file_clicked(self, btn):
@@ -300,6 +315,22 @@ class MainWindow(Adw.Window):
             "username": "admin",
             "host": "http://127.0.0.1:8080"
         }
+
+    def _is_current_local(self):
+        if self.settings and hasattr(self.settings, "is_current_local"):
+            return self.settings.is_current_local()
+        curr = self._get_current_instance_safe()
+        if "local" in curr:
+            return bool(curr.get("local", False))
+        return curr.get("host_ip") in ("127.0.0.1", "localhost", "::1")
+
+    def _is_flatpak(self):
+        if self.settings and hasattr(self.settings, "is_flatpak"):
+            val = self.settings.is_flatpak()
+            if isinstance(val, bool):
+                return val
+        import os
+        return os.path.exists("/.flatpak-info") or bool(os.environ.get("FLATPAK_ID"))
 
     def _get_instances_safe(self):
         if hasattr(self.app, "settings") and hasattr(self.app.settings, "get_instances"):
@@ -541,7 +572,7 @@ class MainWindow(Adw.Window):
         except (ValueError, TypeError):
             port = 8080
 
-        is_local = curr_inst.get("local", False) or host_ip in ("127.0.0.1", "localhost", "::1")
+        is_local = self._is_current_local()
         autostart = True
         if hasattr(self.app, "settings") and self.app.settings:
             autostart = bool(self.app.settings.get("engine_autostart", True))
@@ -587,8 +618,7 @@ class MainWindow(Adw.Window):
                     pass
 
                 # 2. If local & autostart enabled (and not in Flatpak), trigger local daemon manager
-                settings = self.settings or getattr(self.app, "settings", None)
-                is_flatpak = settings.is_flatpak() if (settings and hasattr(settings, "is_flatpak")) else (os.path.exists("/.flatpak-info") or bool(os.environ.get("FLATPAK_ID")))
+                is_flatpak = self._is_flatpak()
                 if is_local and autostart and not is_flatpak:
                     def update_status():
                         self.loading_page.set_description("Starting local qBittorrent background engine…")
@@ -652,7 +682,7 @@ class MainWindow(Adw.Window):
             port = int(curr_inst.get("port", 8080))
         except (ValueError, TypeError):
             port = 8080
-        is_local = host_ip in ("127.0.0.1", "localhost", "::1")
+        is_local = self._is_current_local()
 
         if is_local:
             banner.set_title("Starting local qBittorrent...")
@@ -712,7 +742,7 @@ class MainWindow(Adw.Window):
         if not is_conn and len(torrents_data) == 0:
             curr_inst = self._get_current_instance_safe()
             host_ip = curr_inst.get("host_ip", "127.0.0.1")
-            is_local = host_ip in ("127.0.0.1", "localhost", "::1")
+            is_local = self._is_current_local()
             if is_local:
                 self.offline_banner.set_title("Local qBittorrent is offline.")
                 self.offline_banner.set_button_label("Start Engine")
