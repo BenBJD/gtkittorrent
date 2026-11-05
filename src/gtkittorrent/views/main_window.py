@@ -22,6 +22,7 @@ class MainWindow(Adw.Window):
     def __init__(self, app, client):
         super().__init__(application=app, title="GTKittorrent")
         self.app = app
+        self.settings = getattr(app, "settings", None)
         self.client = client
         self.sync_rid = 0
         self.items_by_hash = {}
@@ -576,57 +577,71 @@ class MainWindow(Adw.Window):
             self.refresh_torrents()
 
         def connect_worker():
-            # 1. Quick probe
             try:
-                if self.client.connect():
-                    GLib.idle_add(on_connected)
-                    return
-            except Exception:
-                pass
+                # 1. Quick probe
+                try:
+                    if self.client.connect():
+                        GLib.idle_add(on_connected)
+                        return
+                except Exception:
+                    pass
 
-            # 2. If local & autostart enabled, trigger local daemon manager
-            if is_local and autostart:
-                def update_status():
-                    self.loading_page.set_description("Starting local qBittorrent background engine…")
-                GLib.idle_add(update_status)
+                # 2. If local & autostart enabled (and not in Flatpak), trigger local daemon manager
+                settings = self.settings or getattr(self.app, "settings", None)
+                is_flatpak = settings.is_flatpak() if (settings and hasattr(settings, "is_flatpak")) else (os.path.exists("/.flatpak-info") or bool(os.environ.get("FLATPAK_ID")))
+                if is_local and autostart and not is_flatpak:
+                    def update_status():
+                        self.loading_page.set_description("Starting local qBittorrent background engine…")
+                    GLib.idle_add(update_status)
 
-                from ..client.daemon import LocalDaemonManager
-                def on_daemon_done(success, msg):
-                    if success:
-                        def retry_connect():
-                            connected = False
-                            for _ in range(12):
-                                time.sleep(0.5)
-                                try:
-                                    if self.client.connect():
-                                        connected = True
-                                        break
-                                except Exception:
-                                    pass
-                            if connected:
-                                GLib.idle_add(on_connected)
-                            else:
-                                GLib.idle_add(on_failed, "Engine started, but Web UI did not respond")
-                        threading.Thread(target=retry_connect, daemon=True).start()
-                    else:
-                        GLib.idle_add(on_failed, msg)
+                    from ..client.daemon import LocalDaemonManager
+                    def on_daemon_done(success, msg):
+                        if success:
+                            def retry_connect():
+                                connected = False
+                                for _ in range(12):
+                                    time.sleep(0.5)
+                                    try:
+                                        if self.client.connect():
+                                            connected = True
+                                            break
+                                    except Exception:
+                                        pass
+                                if connected:
+                                    GLib.idle_add(on_connected)
+                                else:
+                                    GLib.idle_add(on_failed, "Engine started, but Web UI did not respond")
+                            threading.Thread(target=retry_connect, daemon=True).start()
+                        else:
+                            # Even if daemon manager reported failure, check if client can connect
+                            try:
+                                if self.client.connect():
+                                    GLib.idle_add(on_connected)
+                                    return
+                            except Exception:
+                                pass
+                            GLib.idle_add(on_failed, msg)
 
-                LocalDaemonManager.get_instance().start_daemon_async(port=port, callback=on_daemon_done)
-            else:
-                # Remote or local without autostart: poll with timeout up to 5 seconds
-                connected = False
-                for _ in range(5):
-                    time.sleep(1.0)
-                    try:
-                        if self.client.connect():
-                            connected = True
-                            break
-                    except Exception:
-                        pass
-                if connected:
-                    GLib.idle_add(on_connected)
+                    LocalDaemonManager.get_instance().start_daemon_async(port=port, callback=on_daemon_done)
                 else:
-                    GLib.idle_add(on_failed, "Connection timed out")
+                    # Remote or local without autostart: poll with timeout up to 5 seconds
+                    connected = False
+                    for _ in range(5):
+                        time.sleep(1.0)
+                        try:
+                            if self.client.connect():
+                                connected = True
+                                break
+                        except Exception:
+                            pass
+                    if connected:
+                        GLib.idle_add(on_connected)
+                    else:
+                        GLib.idle_add(on_failed, "Connection timed out")
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Error in connect_worker: {e}")
+                GLib.idle_add(on_failed, str(e))
 
         threading.Thread(target=connect_worker, daemon=True).start()
 

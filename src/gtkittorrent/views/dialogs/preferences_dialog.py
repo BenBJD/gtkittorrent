@@ -94,8 +94,8 @@ class PreferencesDialog(Adw.PreferencesWindow):
         self.daemon_mgr = LocalDaemonManager.get_instance()
         bin_info = self.daemon_mgr.get_binary_info()
 
-        engine_group = Adw.PreferencesGroup(title="Local Background Engine")
-        page.add(engine_group)
+        self.engine_group = Adw.PreferencesGroup(title="Local Background Engine")
+        page.add(self.engine_group)
 
         self.engine_binary_row = Adw.ActionRow(title="Engine Binary")
         if bin_info["preferred"] == "qbittorrent-nox":
@@ -107,7 +107,7 @@ class PreferencesDialog(Adw.PreferencesWindow):
         else:
             self.engine_binary_row.set_subtitle("Not found. Please install qbittorrent-nox or qbittorrent.")
             self.engine_binary_row.add_suffix(Gtk.Image.new_from_icon_name("dialog-warning-symbolic"))
-        engine_group.add(self.engine_binary_row)
+        self.engine_group.add(self.engine_binary_row)
 
         if bin_info.get("recommend_nox"):
             tip_row = Adw.ActionRow(
@@ -115,14 +115,14 @@ class PreferencesDialog(Adw.PreferencesWindow):
                 subtitle="Install qbittorrent-nox for a pure headless daemon without desktop windows."
             )
             tip_row.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
-            engine_group.add(tip_row)
+            self.engine_group.add(tip_row)
 
         # Service Control Row (Start / Stop / Restart buttons)
         self.engine_control_row = Adw.ActionRow(
             title="Service Control",
             subtitle="Checking engine status…"
         )
-        engine_group.add(self.engine_control_row)
+        self.engine_group.add(self.engine_control_row)
 
         self.engine_status_spinner = Gtk.Spinner(valign=Gtk.Align.CENTER)
         self.engine_control_row.add_suffix(self.engine_status_spinner)
@@ -154,8 +154,6 @@ class PreferencesDialog(Adw.PreferencesWindow):
         self.engine_restart_btn.connect("clicked", self._on_engine_restart_clicked)
         btn_box.append(self.engine_restart_btn)
 
-        self._check_engine_status()
-
         self.engine_autostart_row = Adw.ActionRow(
             title="Start Engine on Launch",
             subtitle="Automatically launch local qBittorrent when opening GTKittorrent"
@@ -165,7 +163,7 @@ class PreferencesDialog(Adw.PreferencesWindow):
             valign=Gtk.Align.CENTER
         )
         self.engine_autostart_row.add_suffix(self.engine_autostart_switch)
-        engine_group.add(self.engine_autostart_row)
+        self.engine_group.add(self.engine_autostart_row)
 
         self.engine_stop_on_exit_row = Adw.ActionRow(
             title="Stop Engine on Exit",
@@ -176,9 +174,35 @@ class PreferencesDialog(Adw.PreferencesWindow):
             valign=Gtk.Align.CENTER
         )
         self.engine_stop_on_exit_row.add_suffix(self.engine_stop_on_exit_switch)
-        engine_group.add(self.engine_stop_on_exit_row)
+        self.engine_group.add(self.engine_stop_on_exit_row)
 
-        conn_group = Adw.PreferencesGroup(title="Listening Port & Limits")
+        # Apply visibility (hidden if not a local instance) and Flatpak restrictions
+        is_local = self._is_local_instance()
+        is_flatpak = self._is_flatpak()
+
+        if not is_local:
+            self.engine_group.set_visible(False)
+        else:
+            self.engine_group.set_visible(True)
+            if is_flatpak:
+                self.engine_group.set_description("Local background engine management is not available in Flatpak.")
+                self.engine_binary_row.set_subtitle("Not available in Flatpak")
+                self.engine_binary_row.set_sensitive(False)
+                self.engine_control_row.set_subtitle("Not available in Flatpak")
+                self.engine_control_row.set_sensitive(False)
+                self.engine_start_btn.set_sensitive(False)
+                self.engine_stop_btn.set_sensitive(False)
+                self.engine_restart_btn.set_sensitive(False)
+                self.engine_autostart_row.set_subtitle("Not available in Flatpak")
+                self.engine_autostart_row.set_sensitive(False)
+                self.engine_autostart_switch.set_sensitive(False)
+                self.engine_stop_on_exit_row.set_subtitle("Not available in Flatpak")
+                self.engine_stop_on_exit_row.set_sensitive(False)
+                self.engine_stop_on_exit_switch.set_sensitive(False)
+            else:
+                self._check_engine_status()
+
+        conn_group = Adw.PreferencesGroup(title="Listening Port &amp; Limits")
         page.add(conn_group)
 
         self.listen_port_row = Adw.SpinRow(
@@ -396,6 +420,26 @@ class PreferencesDialog(Adw.PreferencesWindow):
             except (ValueError, TypeError):
                 return 8080
 
+    def _is_local_instance(self):
+        if not self.settings:
+            return False
+        if hasattr(self.settings, "is_current_local"):
+            val = self.settings.is_current_local()
+            if isinstance(val, bool):
+                return val
+        curr = self.settings.get_current_instance() if hasattr(self.settings, "get_current_instance") else None
+        if isinstance(curr, dict):
+            return bool(curr.get("local", False))
+        return self.settings.get("host_ip") in ("127.0.0.1", "localhost", "::1")
+
+    def _is_flatpak(self):
+        if self.settings and hasattr(self.settings, "is_flatpak"):
+            val = self.settings.is_flatpak()
+            if isinstance(val, bool):
+                return val
+        import os
+        return os.path.exists("/.flatpak-info") or bool(os.environ.get("FLATPAK_ID"))
+
     def _check_engine_status(self):
         port = self._get_local_port()
         self.engine_status_spinner.start()
@@ -408,6 +452,13 @@ class PreferencesDialog(Adw.PreferencesWindow):
 
     def _update_engine_status_ui(self, is_running, port):
         self.engine_status_spinner.stop()
+        if self._is_flatpak():
+            self.engine_start_btn.set_sensitive(False)
+            self.engine_stop_btn.set_sensitive(False)
+            self.engine_restart_btn.set_sensitive(False)
+            self.engine_control_row.set_subtitle("Not available in Flatpak")
+            return
+
         self.engine_start_btn.set_sensitive(not is_running)
         self.engine_stop_btn.set_sensitive(is_running)
         self.engine_restart_btn.set_sensitive(True)

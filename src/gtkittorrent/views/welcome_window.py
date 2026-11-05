@@ -24,6 +24,11 @@ class WelcomeWindow(Adw.Window):
         self.configured_count = 0
         self.local_configured = False
         self.summary_rows = []
+        self._status_timer_id = None
+        self._is_checking_status = False
+        self._is_starting_engine = False
+        self.current_page_index = 0
+        self.connect("close-request", self._on_close_request)
 
         self.set_default_size(580, 740)
         self.set_modal(True)
@@ -77,20 +82,27 @@ class WelcomeWindow(Adw.Window):
         main_box.append(self.dots)
 
     def _go_to_page(self, page_index):
+        self.current_page_index = page_index
         target = [self.page_mode, self.page_local, self.page_remote][page_index]
         self.carousel.scroll_to(target, True)
         self.back_btn.set_visible(page_index > 0)
         if page_index == 0:
+            self._stop_status_timer()
             self.title_widget.set_title("Welcome to GTKittorrent")
             self.title_widget.set_subtitle("")
             self._update_instances_summary()
         elif page_index == 1:
             self.title_widget.set_title("Local Setup")
             self.title_widget.set_subtitle("This Computer")
-            self._refresh_local_engine_status()
+            self._start_status_timer()
         elif page_index == 2:
+            self._stop_status_timer()
             self.title_widget.set_title("Remote Setup")
             self.title_widget.set_subtitle("Network Server / NAS")
+
+    def _on_close_request(self, win):
+        self._stop_status_timer()
+        return False
 
     def _check_initial_state(self):
         self.local_configured = False
@@ -237,13 +249,17 @@ class WelcomeWindow(Adw.Window):
         box.append(status_page)
 
         # Engine Inspection Group
+        is_flatpak = self._is_flatpak()
         eng_group = Adw.PreferencesGroup(title="Background Engine")
         box.append(eng_group)
 
         # Binary Detected Row
         bin_info = self.daemon_mgr.get_binary_info()
         self.bin_row = Adw.ActionRow(title="Detected Engine")
-        if bin_info["preferred"] == "qbittorrent-nox":
+        if is_flatpak:
+            self.bin_row.set_subtitle("Not available in Flatpak (runs on host)")
+            self.bin_row.set_sensitive(False)
+        elif bin_info["preferred"] == "qbittorrent-nox":
             self.bin_row.set_subtitle("qbittorrent-nox (Headless daemon)")
             self.bin_row.add_suffix(Gtk.Image.new_from_icon_name("emblem-ok-symbolic"))
         elif bin_info["preferred"] == "qbittorrent":
@@ -255,7 +271,7 @@ class WelcomeWindow(Adw.Window):
         eng_group.add(self.bin_row)
 
         # Recommendation for nox if only GUI is installed
-        if bin_info["recommend_nox"]:
+        if not is_flatpak and bin_info["recommend_nox"]:
             tip_row = Adw.ActionRow(
                 title="Recommended: qbittorrent-nox",
                 subtitle="Install qbittorrent-nox for a 100% headless daemon without desktop windows."
@@ -276,6 +292,10 @@ class WelcomeWindow(Adw.Window):
         self.local_start_btn = Gtk.Button(label="Start Background Engine", css_classes=["suggested-action"], valign=Gtk.Align.CENTER)
         self.local_start_btn.connect("clicked", self._on_start_local_engine_clicked)
         self.local_ctrl_row.add_suffix(self.local_start_btn)
+        if is_flatpak:
+            self.local_start_btn.set_sensitive(False)
+            self.local_start_btn.set_tooltip_text("Starting local engine is not available in Flatpak")
+            self.local_ctrl_row.set_subtitle("Not available in Flatpak (start qBittorrent on the host)")
         eng_group.add(self.local_ctrl_row)
 
         # Local Config / Advanced Expander
@@ -424,38 +444,91 @@ class WelcomeWindow(Adw.Window):
         return scrolled
 
     # ---------------- Local Engine Logic ----------------
-    def _refresh_local_engine_status(self):
-        port = int(self.local_port_entry.get_text().strip() or "8080")
-        self.local_status_spinner.start()
+    def _start_status_timer(self):
+        self._refresh_local_engine_status(show_spinner=True)
+        if self._status_timer_id is None:
+            self._status_timer_id = GLib.timeout_add_seconds(1, self._on_status_timer_tick)
+
+    def _stop_status_timer(self):
+        if self._status_timer_id is not None:
+            GLib.source_remove(self._status_timer_id)
+            self._status_timer_id = None
+
+    def _on_status_timer_tick(self):
+        if self.current_page_index == 1:
+            self._refresh_local_engine_status(show_spinner=False)
+            return True
+        self._status_timer_id = None
+        return False
+
+    def _refresh_local_engine_status(self, show_spinner=True):
+        if self._is_checking_status or self._is_starting_engine:
+            return
+        try:
+            port_text = self.local_port_entry.get_text().strip()
+            port = int(port_text) if port_text else 8080
+        except (ValueError, TypeError):
+            port = 8080
+
+        self._is_checking_status = True
+        if show_spinner:
+            self.local_status_spinner.start()
 
         def _check():
-            is_running = self.daemon_mgr.is_engine_running("127.0.0.1", port)
+            try:
+                is_running = self.daemon_mgr.is_engine_running("127.0.0.1", port)
+            except Exception:
+                is_running = False
             GLib.idle_add(self._on_local_engine_status_result, is_running, port)
 
         threading.Thread(target=_check, daemon=True).start()
 
+    def _is_flatpak(self):
+        if self.settings and hasattr(self.settings, "is_flatpak"):
+            val = self.settings.is_flatpak()
+            if isinstance(val, bool):
+                return val
+        import os
+        return os.path.exists("/.flatpak-info") or bool(os.environ.get("FLATPAK_ID"))
+
     def _on_local_engine_status_result(self, is_running, port):
+        self._is_checking_status = False
         self.local_status_spinner.stop()
+        is_flatpak = self._is_flatpak()
         if is_running:
             self.local_status_lbl.set_markup(f"<span color='#2ec27e'><b>Running</b> (127.0.0.1:{port})</span>")
             self.local_start_btn.set_label("Restart Engine")
-            self.local_start_btn.set_sensitive(True)
+            if is_flatpak:
+                self.local_start_btn.set_sensitive(False)
+                self.local_ctrl_row.set_subtitle("Not available in Flatpak")
+            else:
+                self.local_start_btn.set_sensitive(True)
             self.local_success_banner.set_title(f"Local engine is running on port {port}.")
             self.local_success_banner.set_revealed(True)
         else:
             self.local_status_lbl.set_markup("<span color='#e01b24'><b>Stopped</b></span>")
             self.local_start_btn.set_label("Start Background Engine")
-            self.local_start_btn.set_sensitive(True)
+            if is_flatpak:
+                self.local_start_btn.set_sensitive(False)
+                self.local_ctrl_row.set_subtitle("Not available in Flatpak (start qBittorrent on the host)")
+            else:
+                self.local_start_btn.set_sensitive(True)
             self.local_success_banner.set_revealed(False)
 
     def _on_start_local_engine_clicked(self, btn):
-        port = int(self.local_port_entry.get_text().strip() or "8080")
+        try:
+            port_text = self.local_port_entry.get_text().strip()
+            port = int(port_text) if port_text else 8080
+        except (ValueError, TypeError):
+            port = 8080
+        self._is_starting_engine = True
         self.local_start_btn.set_sensitive(False)
         self.local_status_spinner.start()
         self.local_status_lbl.set_markup("<i>Starting engine...</i>")
         self.local_success_banner.set_revealed(False)
 
         def _on_done(success, message):
+            self._is_starting_engine = False
             self.local_status_spinner.stop()
             self.local_start_btn.set_sensitive(True)
             if success:
@@ -571,6 +644,7 @@ class WelcomeWindow(Adw.Window):
 
     # ---------------- Finish and Launch Flow ----------------
     def _finish_and_open(self):
+        self._stop_status_timer()
         if self.settings:
             self.settings.set("welcome_completed", True)
             self.settings.set("configured", True)

@@ -142,6 +142,14 @@ class LocalDaemonManager:
         self._is_starting = True
 
         def _worker():
+            # If engine is already running, succeed immediately
+            if self.is_engine_running("127.0.0.1", port):
+                self._is_starting = False
+                logger.info(f"{bin_info['preferred']} is already running on port {port}")
+                if callback:
+                    GLib.idle_add(callback, True, f"{bin_info['preferred']} is already running")
+                return
+
             # 1. Prepare config if needed (enable Web UI & bypass localhost auth)
             self.prepare_local_configuration(port=port)
 
@@ -173,11 +181,12 @@ class LocalDaemonManager:
             started = False
             for _ in range(24):
                 time.sleep(0.5)
-                # Check if process died immediately
-                if proc.poll() is not None:
-                    break
                 if self.is_engine_running("127.0.0.1", port):
                     started = True
+                    break
+                if proc.poll() is not None:
+                    if self.is_engine_running("127.0.0.1", port):
+                        started = True
                     break
 
             self._is_starting = False

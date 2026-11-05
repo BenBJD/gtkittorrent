@@ -154,6 +154,19 @@ class Settings:
             self.data["use_https"] = curr.get("use_https", False)
             self.data["host"] = curr.get("host", f"http://{curr.get('host_ip', '127.0.0.1')}:{curr.get('port', '8080')}")
             self.data["name"] = curr.get("name", "Local qBittorrent")
+            self.data["local"] = bool(curr.get("local", False))
+
+    @staticmethod
+    def is_flatpak():
+        """Check if the application is running inside a Flatpak sandbox."""
+        return os.path.exists("/.flatpak-info") or bool(os.environ.get("FLATPAK_ID"))
+
+    def is_current_local(self):
+        """Check if the currently active instance is a local qBittorrent daemon."""
+        curr = self.get_current_instance()
+        if curr:
+            return bool(curr.get("local", False))
+        return self.data.get("host_ip") in ("127.0.0.1", "localhost", "::1")
 
     def load(self):
         if os.path.exists(self.config_file):

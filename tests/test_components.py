@@ -378,6 +378,51 @@ class TestClientMethods(unittest.TestCase):
             pref_dlg._on_engine_restart_clicked(pref_dlg.engine_restart_btn)
             mock_restart.assert_called_once()
 
+    def test_preferences_dialog_engine_controls_hidden_for_remote(self):
+        mock_settings = MagicMock()
+        mock_settings.is_current_local.return_value = False
+        mock_settings.is_flatpak.return_value = False
+        mock_settings.get.side_effect = lambda k, d=None: "192.168.1.50" if "ip" in k else "8080"
+        mock_client = MagicMock()
+        mock_client.get_app_preferences.return_value = {}
+
+        pref_dlg = PreferencesDialog(None, mock_settings, mock_client)
+        self.assertFalse(pref_dlg.engine_group.get_visible())
+
+    def test_preferences_dialog_engine_controls_flatpak(self):
+        mock_settings = MagicMock()
+        mock_settings.is_current_local.return_value = True
+        mock_settings.is_flatpak.return_value = True
+        mock_settings.get.side_effect = lambda k, d=None: "127.0.0.1" if "ip" in k else "8080"
+        mock_client = MagicMock()
+        mock_client.get_app_preferences.return_value = {}
+
+        pref_dlg = PreferencesDialog(None, mock_settings, mock_client)
+        self.assertTrue(pref_dlg.engine_group.get_visible())
+        self.assertEqual(pref_dlg.engine_control_row.get_subtitle(), "Not available in Flatpak")
+        self.assertFalse(pref_dlg.engine_start_btn.get_sensitive())
+        self.assertFalse(pref_dlg.engine_stop_btn.get_sensitive())
+        self.assertFalse(pref_dlg.engine_restart_btn.get_sensitive())
+        self.assertFalse(pref_dlg.engine_autostart_row.get_sensitive())
+        self.assertFalse(pref_dlg.engine_stop_on_exit_row.get_sensitive())
+
+    def test_welcome_window_flatpak_disables_start_engine(self):
+        mock_settings = MagicMock()
+        mock_settings.is_flatpak.return_value = True
+        mock_settings.get.side_effect = lambda k, d=None: "admin" if "user" in k else "8080"
+        mock_client = MagicMock()
+
+        welcome = WelcomeWindow(None, mock_settings, mock_client, is_reconnect=False)
+        self.assertFalse(welcome.local_start_btn.get_sensitive())
+        self.assertIn("Not available in Flatpak", welcome.local_ctrl_row.get_subtitle())
+
+        # When status result arrives, button should remain insensitive
+        welcome._on_local_engine_status_result(is_running=False, port=8080)
+        self.assertFalse(welcome.local_start_btn.get_sensitive())
+
+        welcome._on_local_engine_status_result(is_running=True, port=8080)
+        self.assertFalse(welcome.local_start_btn.get_sensitive())
+
 
 class TestDetailsTabs(unittest.TestCase):
     def setUp(self):
@@ -961,6 +1006,41 @@ class TestLocalDaemonAndConfig(unittest.TestCase):
             self.assertTrue(welcome.mode_finish_btn.get_visible())
             self.assertEqual(welcome.mode_finish_btn.get_label(), "Done")
             self.assertEqual(len(welcome.summary_rows), 1)
+
+    def test_welcome_window_status_timer(self):
+        mock_settings = MagicMock()
+        mock_settings.get.side_effect = lambda k, d=None: "127.0.0.1" if "ip" in k else "8080"
+        mock_settings.get_instances.return_value = []
+        mock_settings.is_flatpak.return_value = False
+        mock_client = MagicMock()
+
+        welcome = WelcomeWindow(None, mock_settings, mock_client, is_reconnect=False)
+        self.assertIsNone(welcome._status_timer_id)
+
+        with patch("gtkittorrent.views.welcome_window.GLib.timeout_add_seconds") as mock_timeout, \
+             patch("gtkittorrent.views.welcome_window.GLib.source_remove") as mock_remove:
+            mock_timeout.return_value = 42
+
+            # Navigating to Local page starts the timer
+            welcome._go_to_page(1)
+            mock_timeout.assert_called_once_with(1, welcome._on_status_timer_tick)
+            self.assertEqual(welcome._status_timer_id, 42)
+
+            # Timer tick on page 1 returns True
+            with patch.object(welcome, "_refresh_local_engine_status") as mock_refresh:
+                res = welcome._on_status_timer_tick()
+                self.assertTrue(res)
+                mock_refresh.assert_called_once_with(show_spinner=False)
+
+            # Navigating back to page 0 stops the timer
+            welcome._go_to_page(0)
+            mock_remove.assert_called_once_with(42)
+            self.assertIsNone(welcome._status_timer_id)
+
+            # Timer tick on non-1 page returns False
+            res = welcome._on_status_timer_tick()
+            self.assertFalse(res)
+            self.assertIsNone(welcome._status_timer_id)
 
 
 if __name__ == "__main__":
