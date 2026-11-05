@@ -36,8 +36,51 @@ paru -S gtkittorrent
 
 ### Flatpak
 
+Download the `.flatpak` bundle from the [latest GitHub Release](https://github.com/BenBJD/gtkittorrent/releases) and install it:
+
 ```bash
-# TODO: This
+flatpak install --user gtkittorrent.flatpak
+```
+
+You can then launch it from your desktop application launcher or via:
+```bash
+flatpak run io.github.BenBJD.gtkittorrent
+```
+
+#### Engine Setup (for Local Instances)
+Because the Flatpak runs in a secure sandbox, it functions as a client only and connects to a qBittorrent daemon running on your host (or a remote server).
+
+1. **Install qBittorrent on your host:**
+   - **Recommended (`qbittorrent-nox`)**: Headless daemon with no desktop overhead.
+     - **Arch**: `sudo pacman -S qbittorrent-nox`
+     - **Fedora**: `sudo dnf install qbittorrent-nox`
+     - **Ubuntu / Debian**: `sudo apt install qbittorrent-nox`
+   - **Alternative (`qbittorrent`)**: Standard desktop app (ensure **Web UI** is enabled in *Tools → Options → Web UI*).
+
+2. **Start the background engine:**
+   ```bash
+   qbittorrent-nox -d
+   ```
+   *(Or start it as a systemd user service: `systemctl --user enable --now qbittorrent-nox`)*
+
+GTKittorrent will automatically detect the running engine on `127.0.0.1:8080` and connect.
+
+#### Alternative Download Directory
+
+As Flatpak applications are sandboxed, you will need to give the app permission to access the desired download directory.
+You can do this by running the following command:
+
+```bash
+flatpak override --user io.github.BenBJD.gtkittorrent --filesystem=<path_to_download_directory>
+```
+
+Or use [Flatseal](https://flathub.org/apps/details/com.github.tchx84.Flatseal) to manage permissions in a GUI.
+
+---
+
+*(Optional) Building the Flatpak from source:*
+```bash
+flatpak-builder --user --install --force-clean build-dir io.github.BenBJD.gtkittorrent.json
 ```
 
 ### From Source
