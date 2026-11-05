@@ -93,6 +93,19 @@ jobs:
 
           echo "TARBALL_SHA=$(awk '{print $1}' ${ARCHIVE_NAME}.sha256)" >> "$GITHUB_ENV"
 
+      - name: Install Flatpak build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build Flatpak bundle
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --force-clean --repo=flatpak_repo build-dir io.github.BenBJD.gtkittorrent.json
+          flatpak build-bundle flatpak_repo gtkittorrent.flatpak io.github.BenBJD.gtkittorrent
+          sha256sum gtkittorrent.flatpak > gtkittorrent.flatpak.sha256
+          echo "FLATPAK_SHA=$(awk '{print $1}' gtkittorrent.flatpak.sha256)" >> "$GITHUB_ENV"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -101,9 +114,18 @@ jobs:
           files: |
             gtkittorrent-${{ steps.bump.outputs.VERSION }}.tar.gz
             gtkittorrent-${{ steps.bump.outputs.VERSION }}.tar.gz.sha256
+            gtkittorrent.flatpak
+            gtkittorrent.flatpak.sha256
           body: |
             ### Release ${{ steps.bump.outputs.TAG }}
 
-            #### Checksums (for packagers):
+            #### Flatpak Installation
+            Download `gtkittorrent.flatpak` and install:
+            ```bash
+            flatpak install --user gtkittorrent.flatpak
+            ```
+
+            #### Checksums:
+            - `gtkittorrent.flatpak`: `${{ env.FLATPAK_SHA }}`
             - `gtkittorrent-${{ steps.bump.outputs.VERSION }}.tar.gz`: `${{ env.TARBALL_SHA }}`
           generate_release_notes: true
