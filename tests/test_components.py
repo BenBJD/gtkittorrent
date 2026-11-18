@@ -552,16 +552,17 @@ class TestClientMethods(unittest.TestCase):
             self.assertTrue(dlg.incomplete_switch.get_active())
             self.assertEqual(dlg.incomplete_path_entry.get_text(), "/tmp/inc")
 
-            # Filter files
+            # Filter files (tree preserves MyPkgs folder with file2.iso)
             dlg.files_filter_entry.set_text("file2")
             dlg._on_files_filter_changed(dlg.files_filter_entry)
-            self.assertFalse(dlg._file_rows[0][0].get_visible())
-            self.assertTrue(dlg._file_rows[1][0].get_visible())
+            self.assertEqual(len(dlg._leaves_by_index), 1)
+            self.assertIn(1, dlg._leaves_by_index)
 
-            # Uncheck second file (priority -> 0) and set first file priority to High (index 2 -> 6)
-            dlg._file_rows[0][2].set_selected(2)
-            dlg._file_rows[1][1].set_active(False)
-            self.assertEqual(dlg._file_rows[1][2].get_selected(), 0)
+            # Clear filter and set file 0 priority to High (6), file 1 to Do not download (0)
+            dlg.files_filter_entry.set_text("")
+            dlg._on_files_filter_changed(dlg.files_filter_entry)
+            dlg._apply_node_priority(dlg._leaves_by_index[0], 6)
+            dlg._apply_node_priority(dlg._leaves_by_index[1], 0)
 
             dlg.rename_entry.set_text("CustomName")
             dlg.cat_row.set_selected(1)  # Linux
@@ -634,13 +635,17 @@ class TestClientMethods(unittest.TestCase):
 
         # Simulate metadata arriving from qBittorrent
         dlg._temp_added_hash = "d0f23c109d8662a3fe9338f75839af8d57e5d4a9"
-        dlg._on_metadata_files_loaded([("ubuntu.iso", 1500), ("readme.txt", 100)])
+        dlg._on_metadata_files_loaded([("ubuntu/ubuntu.iso", 1500), ("ubuntu/readme.txt", 100)])
         self.assertEqual(dlg.files_stack.get_visible_child_name(), "list")
-        self.assertEqual(len(dlg._file_rows), 2)
+        self.assertEqual(dlg.files_model.get_n_items(), 1)  # Root "ubuntu" folder
+        folder = dlg.files_model.get_item(0)
+        self.assertTrue(folder.is_folder)
+        self.assertEqual(folder.children.get_n_items(), 2)
 
-        # Skip readme.txt, set ubuntu.iso to Maximum (index 3 -> 7)
-        dlg._file_rows[0][2].set_selected(3)
-        dlg._file_rows[1][1].set_active(False)
+        # Skip readme.txt, set ubuntu.iso to Maximum (7)
+        dlg._apply_node_priority(dlg._leaves_by_index[0], 7)
+        dlg._apply_node_priority(dlg._leaves_by_index[1], 0)
+        self.assertEqual(folder.priority_str, "Mixed")
         dlg.cat_row.set_selected(1)
         dlg._on_add_clicked(None)
 
@@ -701,6 +706,28 @@ class TestDetailsTabs(unittest.TestCase):
         f1 = content_tab.model.get_item(0)
         self.assertEqual(f1.name, 'file1.txt')
         self.assertEqual(f1.priority_str, 'Normal')
+
+    def test_content_tab_tree_structure(self):
+        self.mock_client.get_torrent_contents.return_value = [
+            {'index': 0, 'name': 'Ubuntu/ubuntu.iso', 'size': 1000, 'progress': 0.5, 'priority': 1},
+            {'index': 1, 'name': 'Ubuntu/docs/readme.txt', 'size': 200, 'progress': 1.0, 'priority': 1},
+        ]
+        content_tab = ContentTab(self.mock_client)
+        content_tab.update(TorrentItem({'hash': 'abc'}))
+
+        self.assertEqual(content_tab.model.get_n_items(), 1)
+        root_folder = content_tab.model.get_item(0)
+        self.assertTrue(root_folder.is_folder)
+        self.assertEqual(root_folder.display_name, 'Ubuntu')
+        self.assertEqual(root_folder.size, 1200)
+        self.assertEqual(root_folder.priority_str, 'Normal')
+        self.assertEqual(root_folder.children.get_n_items(), 2)
+
+        # Setting priority on folder applies to all descendant leaf indices
+        content_tab.selection_model.set_selected(0)
+        content_tab._set_selected_priority(6)
+        self.mock_client.set_file_priority.assert_called_with('abc', [0, 1], 6)
+        self.assertEqual(root_folder.priority_str, 'High')
 
     def test_trackers_tab(self):
         self.mock_client.get_torrent_trackers.return_value = [

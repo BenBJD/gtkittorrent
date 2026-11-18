@@ -7,8 +7,9 @@ import urllib.request
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, GLib
+from gi.repository import Gtk, Adw, GLib, Gio
 
+from ...models.file_item import FileItem, build_file_tree
 from ...utils.formatters import format_bytes
 
 
@@ -192,7 +193,8 @@ class AddTorrentDialog(Adw.Window):
         self._was_auto = False
 
         self.torrent_files_info = _parse_torrent_files(self.torrent_file) if self.torrent_file else []
-        self._file_rows = []
+        self._leaf_priorities = {}
+        self._leaves_by_index = {}
         self._closed = False
         self._submitted = False
         self._temp_added_hash = None
@@ -435,9 +437,19 @@ class AddTorrentDialog(Adw.Window):
         self.files_status_box.append(self.files_spinner)
         self.files_status_box.append(self.files_status_lbl)
 
+        self.files_model = Gio.ListStore(item_type=FileItem)
+        self.files_tree_model = Gtk.TreeListModel.new(
+            self.files_model,
+            False,
+            True,
+            lambda item: item.children if item.is_folder else None,
+        )
+        self.files_selection = Gtk.NoSelection(model=self.files_tree_model)
+        self.files_view = Gtk.ColumnView(model=self.files_selection)
+        self._setup_files_columns()
+
         self.files_scroller = Gtk.ScrolledWindow(vexpand=True, css_classes=["card"])
-        self.files_listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        self.files_scroller.set_child(self.files_listbox)
+        self.files_scroller.set_child(self.files_view)
 
         self.files_stack = Gtk.Stack(vexpand=True)
         self.files_stack.add_named(self.files_scroller, "list")
@@ -454,56 +466,197 @@ class AddTorrentDialog(Adw.Window):
 
         return pane
 
-    def _populate_files_list(self, files_info):
-        while True:
-            child = self.files_listbox.get_first_child()
-            if child is None:
-                break
-            self.files_listbox.remove(child)
-        self._file_rows = []
-        self.torrent_files_info = list(files_info)
+    def _setup_files_columns(self):
+        # Name column (TreeExpander + CheckButton + Icon + Label)
+        f_name = Gtk.SignalListItemFactory()
+
+        def setup_name(_f, list_item):
+            expander = Gtk.TreeExpander()
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, margin_start=4, margin_end=4)
+            cb = Gtk.CheckButton(valign=Gtk.Align.CENTER)
+            icon = Gtk.Image()
+            lbl = Gtk.Label(xalign=0, hexpand=True, ellipsize=3)
+            box.append(cb)
+            box.append(icon)
+            box.append(lbl)
+            expander.set_child(box)
+            list_item.set_child(expander)
+
+        def bind_name(_f, list_item):
+            row = list_item.get_item()
+            expander = list_item.get_child()
+            if not row or not expander:
+                return
+            expander.set_list_row(row if isinstance(row, Gtk.TreeListRow) else None)
+            f_item = row.get_item() if isinstance(row, Gtk.TreeListRow) else row
+            box = expander.get_child()
+            cb = box.get_first_child()
+            icon = cb.get_next_sibling()
+            lbl = icon.get_next_sibling()
+            if not f_item:
+                return
+
+            if hasattr(cb, "_toggled_hid") and cb._toggled_hid:
+                cb.disconnect(cb._toggled_hid)
+                cb._toggled_hid = 0
+            if hasattr(cb, "_prio_hid") and cb._prio_hid:
+                cb._bound_item.disconnect(cb._prio_hid)
+                cb._prio_hid = 0
+
+            icon.set_from_icon_name("folder-symbolic" if f_item.is_folder else "text-x-generic-symbolic")
+            lbl.set_text(f_item.display_name or f_item.name)
+            lbl.set_tooltip_text(f_item.name)
+
+            guard = [False]
+
+            def sync_cb(*_a):
+                guard[0] = True
+                if f_item.is_folder and f_item.priority == -1:
+                    cb.set_inconsistent(True)
+                    cb.set_active(True)
+                else:
+                    cb.set_inconsistent(False)
+                    cb.set_active(f_item.priority != 0)
+                guard[0] = False
+
+            sync_cb()
+            cb._bound_item = f_item
+            cb._prio_hid = f_item.connect("notify::priority", sync_cb)
+
+            def on_toggled(btn):
+                if guard[0]:
+                    return
+                new_prio = 1 if btn.get_active() else 0
+                self._apply_node_priority(f_item, new_prio)
+
+            cb._toggled_hid = cb.connect("toggled", on_toggled)
+
+        def unbind_name(_f, list_item):
+            expander = list_item.get_child()
+            if not expander:
+                return
+            cb = expander.get_child().get_first_child()
+            if hasattr(cb, "_toggled_hid") and cb._toggled_hid:
+                cb.disconnect(cb._toggled_hid)
+                cb._toggled_hid = 0
+            if hasattr(cb, "_prio_hid") and cb._prio_hid:
+                cb._bound_item.disconnect(cb._prio_hid)
+                cb._prio_hid = 0
+
+        f_name.connect("setup", setup_name)
+        f_name.connect("bind", bind_name)
+        f_name.connect("unbind", unbind_name)
+        col_name = Gtk.ColumnViewColumn(title="Name", factory=f_name)
+        col_name.set_expand(True)
+        self.files_view.append_column(col_name)
+
+        # Size column
+        f_size = Gtk.SignalListItemFactory()
+        f_size.connect("setup", lambda _f, li: li.set_child(Gtk.Label(xalign=1, margin_start=4, margin_end=4)))
+
+        def bind_size(_f, li):
+            row = li.get_item()
+            f_item = row.get_item() if isinstance(row, Gtk.TreeListRow) else row
+            li.get_child().set_text(f_item.size_str if f_item else "")
+
+        f_size.connect("bind", bind_size)
+        col_size = Gtk.ColumnViewColumn(title="Size", factory=f_size)
+        col_size.set_fixed_width(85)
+        self.files_view.append_column(col_size)
+
+        # Priority column
+        f_prio = Gtk.SignalListItemFactory()
         prio_model = Gtk.StringList.new(self.FILE_PRIORITY_LABELS)
-        for rel_path, size in self.torrent_files_info:
-            row = Gtk.ListBoxRow()
-            row_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_top=6, margin_bottom=6, margin_start=8, margin_end=8)
-            cb = Gtk.CheckButton(active=True)
-            lbl = Gtk.Label(label=rel_path, xalign=0, hexpand=True, ellipsize=3)  # PANGO_ELLIPSIZE_END
-            lbl.set_tooltip_text(rel_path)
-            sz_lbl = Gtk.Label(label=format_bytes(size), css_classes=["dim-label"])
-            prio_dd = Gtk.DropDown(model=prio_model, selected=1, valign=Gtk.Align.CENTER)
 
-            syncing = [False]
+        def setup_prio(_f, li):
+            dd = Gtk.DropDown(model=prio_model, valign=Gtk.Align.CENTER)
+            li.set_child(dd)
 
-            def on_cb_toggled(btn, dd=prio_dd, guard=syncing):
+        def bind_prio(_f, li):
+            row = li.get_item()
+            dd = li.get_child()
+            f_item = row.get_item() if isinstance(row, Gtk.TreeListRow) else row
+            if not dd or not f_item:
+                return
+
+            if hasattr(dd, "_sel_hid") and dd._sel_hid:
+                dd.disconnect(dd._sel_hid)
+                dd._sel_hid = 0
+            if hasattr(dd, "_prio_hid") and dd._prio_hid:
+                dd._bound_item.disconnect(dd._prio_hid)
+                dd._prio_hid = 0
+
+            guard = [False]
+
+            def sync_dd(*_a):
+                guard[0] = True
+                if f_item.priority in self.FILE_PRIORITIES:
+                    dd.set_selected(self.FILE_PRIORITIES.index(f_item.priority))
+                else:
+                    dd.set_selected(Gtk.INVALID_LIST_POSITION)
+                guard[0] = False
+
+            sync_dd()
+            dd._bound_item = f_item
+            dd._prio_hid = f_item.connect("notify::priority", sync_dd)
+
+            def on_sel(dropdown, _pspec):
                 if guard[0]:
                     return
-                guard[0] = True
-                if not btn.get_active():
-                    dd.set_selected(0)
-                elif dd.get_selected() == 0:
-                    dd.set_selected(1)
-                guard[0] = False
-                self._update_selected_files_size()
+                idx = dropdown.get_selected()
+                if 0 <= idx < len(self.FILE_PRIORITIES):
+                    self._apply_node_priority(f_item, self.FILE_PRIORITIES[idx])
 
-            def on_prio_changed(dd, _pspec, btn=cb, guard=syncing):
-                if guard[0]:
-                    return
-                guard[0] = True
-                btn.set_active(dd.get_selected() != 0)
-                guard[0] = False
-                self._update_selected_files_size()
+            dd._sel_hid = dd.connect("notify::selected", on_sel)
 
-            cb.connect("toggled", on_cb_toggled)
-            prio_dd.connect("notify::selected", on_prio_changed)
+        def unbind_prio(_f, li):
+            dd = li.get_child()
+            if not dd:
+                return
+            if hasattr(dd, "_sel_hid") and dd._sel_hid:
+                dd.disconnect(dd._sel_hid)
+                dd._sel_hid = 0
+            if hasattr(dd, "_prio_hid") and dd._prio_hid:
+                dd._bound_item.disconnect(dd._prio_hid)
+                dd._prio_hid = 0
 
-            row_box.append(cb)
-            row_box.append(lbl)
-            row_box.append(sz_lbl)
-            row_box.append(prio_dd)
-            row.set_child(row_box)
-            self.files_listbox.append(row)
-            self._file_rows.append((row, cb, prio_dd, rel_path, size))
+        f_prio.connect("setup", setup_prio)
+        f_prio.connect("bind", bind_prio)
+        f_prio.connect("unbind", unbind_prio)
+        col_prio = Gtk.ColumnViewColumn(title="Priority", factory=f_prio)
+        col_prio.set_fixed_width(145)
+        self.files_view.append_column(col_prio)
 
+    def _apply_node_priority(self, node, priority):
+        prio_name = FileItem.PRIORITY_NAMES.get(priority, str(priority))
+        for leaf in node.get_descendant_leaves():
+            self._leaf_priorities[leaf.index] = priority
+            leaf.priority = priority
+            leaf.priority_str = prio_name
+        for i in range(self.files_model.get_n_items()):
+            root_item = self.files_model.get_item(i)
+            if root_item.is_folder:
+                root_item.refresh_folder_aggregates()
+        self._update_selected_files_size()
+
+    def _populate_files_list(self, files_info, reset_priorities=True):
+        self.torrent_files_info = list(files_info)
+        if reset_priorities or not self._leaf_priorities:
+            self._leaf_priorities = {i: 1 for i in range(len(self.torrent_files_info))}
+
+        query = self.files_filter_entry.get_text().strip().lower() if hasattr(self, "files_filter_entry") else ""
+        files_data = [
+            {
+                "index": i,
+                "name": rel_path,
+                "size": size,
+                "progress": 0.0,
+                "priority": self._leaf_priorities.get(i, 1),
+            }
+            for i, (rel_path, size) in enumerate(self.torrent_files_info)
+            if not query or query in rel_path.lower()
+        ]
+        _, self._leaves_by_index = build_file_tree(files_data, self.files_model)
         self._update_selected_files_size()
         self._update_save_path_subtitle()
 
@@ -612,17 +765,29 @@ class AddTorrentDialog(Adw.Window):
         return False
 
     def _on_files_select_all_toggled(self, cb):
-        active = cb.get_active()
-        for _row, file_cb, _dd, _path, _sz in self._file_rows:
-            file_cb.set_active(active)
+        new_prio = 1 if cb.get_active() else 0
+        for i in range(len(self.torrent_files_info)):
+            self._leaf_priorities[i] = new_prio
+        prio_name = FileItem.PRIORITY_NAMES[new_prio]
+        for lf in self._leaves_by_index.values():
+            lf.priority = new_prio
+            lf.priority_str = prio_name
+        for i in range(self.files_model.get_n_items()):
+            root_item = self.files_model.get_item(i)
+            if root_item.is_folder:
+                root_item.refresh_folder_aggregates()
+        self._update_selected_files_size()
 
-    def _on_files_filter_changed(self, entry):
-        query = entry.get_text().strip().lower()
-        for row, _cb, _dd, rel_path, _sz in self._file_rows:
-            row.set_visible(not query or query in rel_path.lower())
+    def _on_files_filter_changed(self, _entry):
+        if self.torrent_files_info:
+            self._populate_files_list(self.torrent_files_info, reset_priorities=False)
 
     def _update_selected_files_size(self, *_args):
-        total = sum(sz for _row, cb, _dd, _path, sz in self._file_rows if cb.get_active())
+        total = sum(
+            sz
+            for i, (_p, sz) in enumerate(self.torrent_files_info)
+            if self._leaf_priorities.get(i, 1) != 0
+        )
         self.files_total_lbl.set_text(format_bytes(total))
 
     def _get_selected_category(self):
@@ -734,10 +899,10 @@ class AddTorrentDialog(Adw.Window):
         up_limit = up_kib * 1024 if up_kib > 0 else None
 
         file_priorities = None
-        if self.torrent_files_info and hasattr(self, "_file_rows"):
+        if self.torrent_files_info and self._leaf_priorities:
             prios = [
-                self.FILE_PRIORITIES[dd.get_selected()]
-                for _r, _cb, dd, _p, _s in self._file_rows
+                self._leaf_priorities.get(i, 1)
+                for i in range(len(self.torrent_files_info))
             ]
             if any(p != 1 for p in prios):
                 file_priorities = prios
