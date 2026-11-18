@@ -230,6 +230,14 @@ class QBittorrentClient:
             self.logger.error(f"Failed to set location: {e}")
             return False
 
+    def set_auto_management(self, hashes, enable=True):
+        try:
+            self.client.torrents_set_auto_management(enable=enable, torrent_hashes=self._to_hash_list(hashes))
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to set auto management: {e}")
+            return False
+
     def rename_torrent(self, torrent_hash, new_name):
         try:
             self.client.torrents_rename(torrent_hash=torrent_hash, new_torrent_name=new_name)
@@ -403,7 +411,10 @@ class QBittorrentClient:
     # Adding Torrents
     def add_torrent(self, urls=None, torrent_files=None, savepath=None, category=None,
                     tags=None, is_paused=False, is_sequential=False, is_first_last_piece_priority=False,
-                    skip_checking=False, rename=None):
+                    skip_checking=False, rename=None, use_auto_torrent_management=None,
+                    use_download_path=None, download_path=None, add_to_top_of_queue=None,
+                    content_layout=None, download_limit=None, upload_limit=None,
+                    file_priorities=None, stop_condition=None):
         try:
             kwargs = {}
             if savepath:
@@ -422,6 +433,24 @@ class QBittorrentClient:
                 kwargs['is_skip_checking'] = skip_checking
             if rename:
                 kwargs['rename'] = rename
+            if use_auto_torrent_management is not None:
+                kwargs['use_auto_torrent_management'] = use_auto_torrent_management
+            if use_download_path is not None:
+                kwargs['use_download_path'] = use_download_path
+            if download_path:
+                kwargs['download_path'] = download_path
+            if add_to_top_of_queue is not None:
+                kwargs['add_to_top_of_queue'] = add_to_top_of_queue
+            if content_layout:
+                kwargs['content_layout'] = content_layout
+            if download_limit is not None and download_limit > 0:
+                kwargs['download_limit'] = download_limit
+            if upload_limit is not None and upload_limit > 0:
+                kwargs['upload_limit'] = upload_limit
+            if file_priorities is not None:
+                kwargs['file_priorities'] = file_priorities
+            if stop_condition is not None:
+                kwargs['stop_condition'] = stop_condition
 
             self.client.torrents_add(urls=urls, torrent_files=torrent_files, **kwargs)
             return True

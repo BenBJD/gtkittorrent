@@ -11,7 +11,7 @@ from .sidebar import Sidebar
 from .torrent_table import TorrentTable
 from .details.details_notebook import DetailsNotebook
 from .status_bar import StatusBar
-from .dialogs.add_torrent_dialog import AddTorrentDialog
+from .dialogs.add_torrent_dialog import AddTorrentDialog, AddTorrentUrlDialog
 from .dialogs.preferences_dialog import PreferencesDialog
 from .dialogs.instance_dialog import InstanceDialog
 from .welcome_window import WelcomeWindow
@@ -256,7 +256,7 @@ class MainWindow(Adw.Window):
         dialog.show()
 
     def _on_add_url_clicked(self, btn):
-        add_dlg = AddTorrentDialog(self, self.client)
+        add_dlg = AddTorrentUrlDialog(self, self.client)
         add_dlg.present()
 
     def _on_pause_clicked(self, btn):

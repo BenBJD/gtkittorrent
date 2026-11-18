@@ -1,5 +1,7 @@
 import threading
 import time
+import urllib.request
+import urllib.error
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -685,18 +687,84 @@ class PreferencesDialog(Adw.PreferencesWindow):
         page.add(trackers_group)
         _, self.add_trackers_switch = self._switch_row(
             trackers_group, "Automatically append these trackers to new downloads",
-            self.qb_prefs.get("add_trackers_enabled", False))
+            self.qb_prefs.get("add_trackers_enabled", False),
+            subtitle="One tracker URL per line.")
         self.add_trackers_view = Gtk.TextView(
             wrap_mode=Gtk.WrapMode.NONE, monospace=True, top_margin=8, bottom_margin=8,
             left_margin=8, right_margin=8
         )
         self.add_trackers_view.get_buffer().set_text(self.qb_prefs.get("add_trackers", "") or "")
-        trk_scroller = Gtk.ScrolledWindow(min_content_height=110, css_classes=["card"])
+        trk_scroller = Gtk.ScrolledWindow(
+            min_content_height=110,
+            margin_top=8,
+            margin_bottom=8,
+            margin_start=12,
+            margin_end=12,
+            css_classes=["card"],
+        )
         trk_scroller.set_child(self.add_trackers_view)
-        trackers_group.add(trk_scroller)
-        trackers_group.set_description("One tracker URL per line.")
-        self.add_trackers_switch.connect("notify::active", lambda sw, *a: trk_scroller.set_sensitive(sw.get_active()))
-        trk_scroller.set_sensitive(self.add_trackers_switch.get_active())
+        trk_row = Adw.PreferencesRow(activatable=False)
+        trk_row.set_child(trk_scroller)
+        trackers_group.add(trk_row)
+        self.add_trackers_switch.connect("notify::active", lambda sw, *a: trk_row.set_sensitive(sw.get_active()))
+        trk_row.set_sensitive(self.add_trackers_switch.get_active())
+
+        _, self.add_trackers_from_url_switch = self._switch_row(
+            trackers_group,
+            "Automatically append trackers from URL to new downloads",
+            self.qb_prefs.get("add_trackers_from_url_enabled", False),
+        )
+        self.add_trackers_url_entry = Adw.EntryRow(title="Tracker list URL")
+        self.add_trackers_url_entry.set_text(self.qb_prefs.get("add_trackers_url", "") or "")
+        self.fetch_trackers_spinner = Gtk.Spinner(valign=Gtk.Align.CENTER)
+        self.fetch_trackers_spinner.set_visible(False)
+        self.add_trackers_url_entry.add_suffix(self.fetch_trackers_spinner)
+        self.fetch_trackers_btn = Gtk.Button(
+            icon_name="view-refresh-symbolic",
+            valign=Gtk.Align.CENTER,
+            css_classes=["flat"],
+            tooltip_text="Fetch trackers from URL",
+        )
+        self.fetch_trackers_btn.connect("clicked", self._on_fetch_trackers_clicked)
+        self.add_trackers_url_entry.add_suffix(self.fetch_trackers_btn)
+        self.add_trackers_url_entry.connect("entry-activated", self._on_fetch_trackers_clicked)
+        trackers_group.add(self.add_trackers_url_entry)
+
+        self.add_trackers_url_status_row = Adw.ActionRow(title="Retrieved trackers")
+        trackers_group.add(self.add_trackers_url_status_row)
+
+        self.add_trackers_url_list_view = Gtk.TextView(
+            editable=False,
+            cursor_visible=False,
+            wrap_mode=Gtk.WrapMode.NONE,
+            monospace=True,
+            top_margin=8,
+            bottom_margin=8,
+            left_margin=8,
+            right_margin=8,
+        )
+        self._set_retrieved_trackers_text(self.qb_prefs.get("add_trackers_url_list", "") or "")
+        url_trk_scroller = Gtk.ScrolledWindow(
+            min_content_height=110,
+            margin_top=8,
+            margin_bottom=8,
+            margin_start=12,
+            margin_end=12,
+            css_classes=["card"],
+        )
+        url_trk_scroller.set_child(self.add_trackers_url_list_view)
+        url_trk_row = Adw.PreferencesRow(activatable=False)
+        url_trk_row.set_child(url_trk_scroller)
+        trackers_group.add(url_trk_row)
+
+        def _update_url_trackers_sensitivity(*_args):
+            active = self.add_trackers_from_url_switch.get_active()
+            self.add_trackers_url_entry.set_sensitive(active)
+            self.add_trackers_url_status_row.set_sensitive(active)
+            url_trk_row.set_sensitive(active)
+
+        self.add_trackers_from_url_switch.connect("notify::active", _update_url_trackers_sensitivity)
+        _update_url_trackers_sensitivity()
 
         queue_group = Adw.PreferencesGroup(title="Torrent Queueing")
         page.add(queue_group)
@@ -726,6 +794,61 @@ class PreferencesDialog(Adw.PreferencesWindow):
         )
         self.max_active_torrents_row.set_value(self.qb_prefs.get("max_active_torrents", 5))
         queue_group.add(self.max_active_torrents_row)
+
+    def _set_retrieved_trackers_text(self, text):
+        normalized = (text or "").replace("\r\n", "\n")
+        self.add_trackers_url_list_view.get_buffer().set_text(normalized)
+        lines = [ln for ln in normalized.splitlines() if ln.strip()]
+        if lines:
+            self.add_trackers_url_status_row.set_subtitle(
+                f"{len(lines)} tracker{'s' if len(lines) != 1 else ''}"
+            )
+        else:
+            self.add_trackers_url_status_row.set_subtitle("No trackers retrieved")
+
+    def _on_fetch_trackers_clicked(self, *args):
+        url = self.add_trackers_url_entry.get_text().strip()
+        if not url:
+            self.add_trackers_url_status_row.set_subtitle("Enter a tracker list URL first")
+            return
+        if not url.startswith(("http://", "https://")):
+            self.add_trackers_url_status_row.set_subtitle("URL must start with http:// or https://")
+            return
+
+        self.fetch_trackers_btn.set_sensitive(False)
+        self.fetch_trackers_spinner.set_visible(True)
+        self.fetch_trackers_spinner.start()
+        self.add_trackers_url_status_row.set_subtitle("Fetching trackers...")
+
+        def worker():
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "gtkittorrent"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    content = resp.read().decode("utf-8", errors="replace")
+                GLib.idle_add(self._on_fetch_trackers_result, True, content)
+            except Exception as e:
+                # Fall back to qBittorrent's cached list if the URL matches the saved one
+                if self.client and url == (self.qb_prefs.get("add_trackers_url") or "").strip():
+                    try:
+                        prefs = self.client.get_app_preferences() or {}
+                        cached = prefs.get("add_trackers_url_list", "") or ""
+                        if cached:
+                            GLib.idle_add(self._on_fetch_trackers_result, True, cached)
+                            return
+                    except Exception:
+                        pass
+                GLib.idle_add(self._on_fetch_trackers_result, False, str(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_fetch_trackers_result(self, success, result):
+        self.fetch_trackers_spinner.stop()
+        self.fetch_trackers_spinner.set_visible(False)
+        self.fetch_trackers_btn.set_sensitive(True)
+        if success:
+            self._set_retrieved_trackers_text(result)
+        else:
+            self.add_trackers_url_status_row.set_subtitle(f"Failed to fetch: {result}")
 
     def _on_temp_path_toggled(self, switch, *args):
         self.temp_path_entry.set_sensitive(switch.get_active())
@@ -991,6 +1114,8 @@ class PreferencesDialog(Adw.PreferencesWindow):
                 "max_ratio_act": self.SHARE_ACTIONS[self.share_action_row.get_selected()][1],
                 "add_trackers_enabled": self.add_trackers_switch.get_active(),
                 "add_trackers": text_of(self.add_trackers_view),
+                "add_trackers_from_url_enabled": self.add_trackers_from_url_switch.get_active(),
+                "add_trackers_url": self.add_trackers_url_entry.get_text().strip(),
             })
             relocate = self.category_changed_row.get_selected() == 1
             stopped = self.add_stopped_switch.get_active()

@@ -1,4 +1,4 @@
-from .add_torrent_dialog import AddTorrentDialog
+from .add_torrent_dialog import AddTorrentDialog, AddTorrentUrlDialog
 from .preferences_dialog import PreferencesDialog
 from .instance_dialog import InstanceDialog
 from .simple_dialogs import (
@@ -10,6 +10,7 @@ from .simple_dialogs import (
 
 __all__ = [
     'AddTorrentDialog',
+    'AddTorrentUrlDialog',
     'PreferencesDialog',
     'InstanceDialog',
     'CategoryDialog',

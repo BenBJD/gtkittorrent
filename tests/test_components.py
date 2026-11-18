@@ -406,6 +406,257 @@ class TestClientMethods(unittest.TestCase):
         self.assertFalse(pref_dlg.engine_autostart_row.get_sensitive())
         self.assertFalse(pref_dlg.engine_stop_on_exit_row.get_sensitive())
 
+    def test_preferences_dialog_trackers_from_url(self):
+        mock_settings = MagicMock()
+        mock_settings.get.side_effect = lambda k, d=None: "127.0.0.1" if "ip" in k else "8080"
+        mock_client = MagicMock()
+        mock_client.get_app_preferences.return_value = {
+            "add_trackers_enabled": False,
+            "add_trackers": "",
+            "add_trackers_from_url_enabled": True,
+            "add_trackers_url": "https://example.com/trackers.txt",
+            "add_trackers_url_list": "udp://tracker1.example.com:80/announce\nudp://tracker2.example.com:80/announce",
+        }
+
+        pref_dlg = PreferencesDialog(None, mock_settings, mock_client)
+
+        self.assertTrue(pref_dlg.add_trackers_from_url_switch.get_active())
+        self.assertEqual(pref_dlg.add_trackers_url_entry.get_text(), "https://example.com/trackers.txt")
+        self.assertFalse(pref_dlg.add_trackers_url_list_view.get_editable())
+
+        buf = pref_dlg.add_trackers_url_list_view.get_buffer()
+        text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        self.assertIn("udp://tracker1.example.com:80/announce", text)
+        self.assertEqual(pref_dlg.add_trackers_url_status_row.get_subtitle(), "2 trackers")
+
+        # Sensitivity toggles with switch
+        self.assertTrue(pref_dlg.add_trackers_url_entry.get_sensitive())
+        pref_dlg.add_trackers_from_url_switch.set_active(False)
+        self.assertFalse(pref_dlg.add_trackers_url_entry.get_sensitive())
+        self.assertFalse(pref_dlg.add_trackers_url_status_row.get_sensitive())
+        pref_dlg.add_trackers_from_url_switch.set_active(True)
+        self.assertTrue(pref_dlg.add_trackers_url_entry.get_sensitive())
+
+        # Validation for empty and non-HTTP URLs
+        pref_dlg.add_trackers_url_entry.set_text("")
+        pref_dlg._on_fetch_trackers_clicked()
+        self.assertEqual(pref_dlg.add_trackers_url_status_row.get_subtitle(), "Enter a tracker list URL first")
+
+        pref_dlg.add_trackers_url_entry.set_text("ftp://example.com/list.txt")
+        pref_dlg._on_fetch_trackers_clicked()
+        self.assertEqual(pref_dlg.add_trackers_url_status_row.get_subtitle(), "URL must start with http:// or https://")
+
+        # Successful fetch result updates view and count
+        pref_dlg._on_fetch_trackers_result(True, "udp://new.tracker.example:1337/announce\n")
+        updated = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        self.assertEqual(updated, "udp://new.tracker.example:1337/announce\n")
+        self.assertEqual(pref_dlg.add_trackers_url_status_row.get_subtitle(), "1 tracker")
+
+        # Error result updates status subtitle
+        pref_dlg._on_fetch_trackers_result(False, "HTTP Error 404")
+        self.assertIn("Failed to fetch: HTTP Error 404", pref_dlg.add_trackers_url_status_row.get_subtitle())
+
+        # Saving on close sends add_trackers_from_url_enabled & add_trackers_url, not add_trackers_url_list
+        pref_dlg.add_trackers_url_entry.set_text("https://example.com/updated.txt")
+        pref_dlg._on_close()
+        mock_client.set_app_preferences.assert_called_once()
+        saved_prefs = mock_client.set_app_preferences.call_args[0][0]
+        self.assertTrue(saved_prefs["add_trackers_from_url_enabled"])
+        self.assertEqual(saved_prefs["add_trackers_url"], "https://example.com/updated.txt")
+        self.assertNotIn("add_trackers_url_list", saved_prefs)
+
+    def test_add_torrent_dialog_auto_tmm_and_category_path(self):
+        mock_client = MagicMock()
+        mock_client.get_categories.return_value = {
+            "Movies": {"name": "Movies", "savePath": "/downloads/movies"},
+            "ISO": {"name": "ISO", "savePath": ""},
+        }
+        mock_client.get_tags.return_value = ["linux", "hd"]
+        mock_client.get_app_preferences.return_value = {
+            "save_path": "/downloads",
+            "auto_tmm_enabled": False,
+            "temp_path_enabled": False,
+            "temp_path": "/incomplete",
+        }
+        mock_client.get_free_space.return_value = 1024 ** 3
+
+        dlg = AddTorrentDialog(None, mock_client, torrent_url="magnet:?xt=urn:btih:1234")
+        self.assertEqual(dlg.tmm_row.get_selected(), 0)
+        self.assertTrue(dlg.save_path_row.get_sensitive())
+        self.assertEqual(dlg.save_path_entry.get_text(), "/downloads")
+
+        # Switch to Automatic management and pick "Movies"
+        dlg.tmm_row.set_selected(1)
+        self.assertFalse(dlg.save_path_row.get_sensitive())
+        self.assertFalse(dlg.incomplete_switch_row.get_sensitive())
+        dlg.cat_row.set_selected(1)  # Movies
+        self.assertEqual(dlg.save_path_entry.get_text(), "/downloads/movies")
+
+        # Pick "ISO" (empty savePath falls back to default_save_path/ISO)
+        dlg.cat_row.set_selected(2)
+        self.assertEqual(dlg.save_path_entry.get_text(), "/downloads/ISO")
+
+        # Switch back to Manual: restores manual save path and sensitivity
+        dlg.tmm_row.set_selected(0)
+        self.assertTrue(dlg.save_path_row.get_sensitive())
+        self.assertEqual(dlg.save_path_entry.get_text(), "/downloads")
+
+        # Switch back to Automatic and add
+        dlg.tmm_row.set_selected(1)
+        dlg.cat_row.set_selected(1)
+        dlg._on_add_clicked(None)
+        mock_client.add_torrent.assert_called_once()
+        kw = mock_client.add_torrent.call_args.kwargs
+        self.assertTrue(kw["use_auto_torrent_management"])
+        self.assertIsNone(kw["savepath"])
+        self.assertEqual(kw["category"], "Movies")
+
+    def test_add_torrent_dialog_options_and_files(self):
+        mock_parent = Gtk.Window()
+        mock_parent.settings = MagicMock()
+        mock_parent.settings.get.return_value = ""
+
+        mock_client = MagicMock()
+        mock_client.get_categories.return_value = {"Linux": {"name": "Linux", "savePath": "/dl/linux"}}
+        mock_client.get_tags.return_value = ["ubuntu"]
+        mock_client.get_app_preferences.return_value = {
+            "save_path": "/dl",
+            "auto_tmm_enabled": False,
+            "temp_path_enabled": True,
+            "temp_path": "/tmp/inc",
+            "add_stopped_enabled": True,
+            "add_to_top_of_queue": True,
+            "torrent_content_layout": "Subfolder",
+        }
+        mock_client.get_free_space.return_value = 500 * 1024 ** 3
+
+        # Create a minimal bencoded multi-file .torrent
+        bencoded = (
+            b"d4:infod5:filesl"
+            b"d6:lengthi1000e4:pathl9:file1.txtee"
+            b"d6:lengthi2000e4:pathl9:file2.isoee"
+            b"e4:name6:MyPkgse"
+            b"e"
+        )
+        with tempfile.NamedTemporaryFile(suffix=".torrent", delete=False) as tf:
+            tf.write(bencoded)
+            tf.flush()
+            torrent_path = tf.name
+
+        try:
+            dlg = AddTorrentDialog(mock_parent, mock_client, torrent_file=torrent_path)
+            self.assertEqual(len(dlg.torrent_files_info), 2)
+            self.assertFalse(dlg.start_switch.get_active())
+            self.assertTrue(dlg.top_queue_switch.get_active())
+            self.assertEqual(dlg.content_layout_row.get_selected(), 1)  # Subfolder
+            self.assertTrue(dlg.incomplete_switch.get_active())
+            self.assertEqual(dlg.incomplete_path_entry.get_text(), "/tmp/inc")
+
+            # Filter files
+            dlg.files_filter_entry.set_text("file2")
+            dlg._on_files_filter_changed(dlg.files_filter_entry)
+            self.assertFalse(dlg._file_rows[0][0].get_visible())
+            self.assertTrue(dlg._file_rows[1][0].get_visible())
+
+            # Uncheck second file (priority -> 0) and set first file priority to High (index 2 -> 6)
+            dlg._file_rows[0][2].set_selected(2)
+            dlg._file_rows[1][1].set_active(False)
+            self.assertEqual(dlg._file_rows[1][2].get_selected(), 0)
+
+            dlg.rename_entry.set_text("CustomName")
+            dlg.cat_row.set_selected(1)  # Linux
+            dlg.default_cat_switch.set_active(True)
+            dlg.tags_entry.set_text("ubuntu, fast")
+            dlg.dl_limit_row.set_value(100)
+            dlg.up_limit_row.set_value(50)
+
+            dlg._on_add_clicked(None)
+            mock_parent.settings.set.assert_called_with("default_add_category", "Linux")
+            mock_client.add_torrent.assert_called_once()
+            kw = mock_client.add_torrent.call_args.kwargs
+            self.assertEqual(kw["torrent_files"], torrent_path)
+            self.assertEqual(kw["savepath"], "/dl")
+            self.assertFalse(kw["use_auto_torrent_management"])
+            self.assertTrue(kw["use_download_path"])
+            self.assertEqual(kw["download_path"], "/tmp/inc")
+            self.assertEqual(kw["rename"], "CustomName")
+            self.assertEqual(kw["category"], "Linux")
+            self.assertEqual(kw["tags"], ["ubuntu", "fast"])
+            self.assertTrue(kw["is_paused"])
+            self.assertTrue(kw["add_to_top_of_queue"])
+            self.assertEqual(kw["content_layout"], "Subfolder")
+            self.assertEqual(kw["download_limit"], 100 * 1024)
+            self.assertEqual(kw["upload_limit"], 50 * 1024)
+            self.assertEqual(kw["file_priorities"], [6, 0])
+        finally:
+            from pathlib import Path
+            Path(torrent_path).unlink(missing_ok=True)
+            mock_parent.destroy()
+
+    def test_add_torrent_url_dialog_opens_options_dialog(self):
+        from gtkittorrent.views.dialogs import AddTorrentUrlDialog
+        mock_client = MagicMock()
+        mock_client.get_categories.return_value = {}
+        mock_client.get_tags.return_value = []
+        mock_client.get_app_preferences.return_value = {}
+
+        url_dlg = AddTorrentUrlDialog(None, mock_client)
+        # Empty URL shows error
+        url_dlg._on_continue_clicked()
+        self.assertTrue(url_dlg.error_lbl.get_visible())
+
+        # Valid URL opens AddTorrentDialog with torrent_url
+        with patch("gtkittorrent.views.dialogs.add_torrent_dialog.AddTorrentDialog") as mock_opts_cls:
+            mock_opts = MagicMock()
+            mock_opts_cls.return_value = mock_opts
+            url_dlg.url_entry.set_text("magnet:?xt=urn:btih:abcdef")
+            url_dlg._on_continue_clicked()
+            mock_opts_cls.assert_called_once_with(None, mock_client, torrent_url="magnet:?xt=urn:btih:abcdef")
+            mock_opts.present.assert_called_once()
+
+    def test_add_torrent_dialog_magnet_markup_escape_and_metadata_files(self):
+        mock_client = MagicMock()
+        mock_client.get_categories.return_value = {"OS": {"name": "OS", "savePath": "/dl/os"}}
+        mock_client.get_tags.return_value = []
+        mock_client.get_app_preferences.return_value = {"save_path": "/dl"}
+        mock_client.get_free_space.return_value = 100 * 1024 ** 3
+
+        magnet = (
+            "magnet:?xt=urn:btih:D0F23C109D8662A3FE9338F75839AF8D57E5D4A9"
+            "&dn=Ubuntu+MATE+16.04.2&tr=udp%3A%2F%2Ftracker.example.com%3A80%2Fannounce"
+        )
+        with patch("gtkittorrent.views.dialogs.add_torrent_dialog.threading.Thread"):
+            dlg = AddTorrentDialog(None, mock_client, torrent_url=magnet)
+
+        self.assertEqual(dlg.source_row.get_title(), "Ubuntu MATE 16.04.2")
+        self.assertIn("&amp;dn=Ubuntu+MATE+16.04.2", dlg.source_row.get_subtitle())
+        self.assertEqual(dlg.files_stack.get_visible_child_name(), "status")
+
+        # Simulate metadata arriving from qBittorrent
+        dlg._temp_added_hash = "d0f23c109d8662a3fe9338f75839af8d57e5d4a9"
+        dlg._on_metadata_files_loaded([("ubuntu.iso", 1500), ("readme.txt", 100)])
+        self.assertEqual(dlg.files_stack.get_visible_child_name(), "list")
+        self.assertEqual(len(dlg._file_rows), 2)
+
+        # Skip readme.txt, set ubuntu.iso to Maximum (index 3 -> 7)
+        dlg._file_rows[0][2].set_selected(3)
+        dlg._file_rows[1][1].set_active(False)
+        dlg.cat_row.set_selected(1)
+        dlg._on_add_clicked(None)
+
+        mock_client.set_file_priority.assert_any_call(
+            "d0f23c109d8662a3fe9338f75839af8d57e5d4a9", [0], 7
+        )
+        mock_client.set_file_priority.assert_any_call(
+            "d0f23c109d8662a3fe9338f75839af8d57e5d4a9", [1], 0
+        )
+        mock_client.set_category.assert_called_with(
+            ["d0f23c109d8662a3fe9338f75839af8d57e5d4a9"], "OS"
+        )
+        mock_client.resume_torrent.assert_called_with(
+            ["d0f23c109d8662a3fe9338f75839af8d57e5d4a9"]
+        )
+
     def test_welcome_window_flatpak_disables_start_engine(self):
         mock_settings = MagicMock()
         mock_settings.is_flatpak.return_value = True
