@@ -124,7 +124,7 @@ class SpeedLimitDialog(Adw.MessageDialog):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
 
         dl_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        dl_lbl = Gtk.Label(text="Download Limit:", xalign=0, hexpand=True)
+        dl_lbl = Gtk.Label(label="Download Limit:", xalign=0, hexpand=True)
         self.dl_spin = Gtk.SpinButton(
             adjustment=Gtk.Adjustment(lower=0, upper=1000000, step_increment=10, page_increment=100),
             climb_rate=1.0, digits=0
@@ -135,7 +135,7 @@ class SpeedLimitDialog(Adw.MessageDialog):
         box.append(dl_box)
 
         up_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        up_lbl = Gtk.Label(text="Upload Limit:", xalign=0, hexpand=True)
+        up_lbl = Gtk.Label(label="Upload Limit:", xalign=0, hexpand=True)
         self.up_spin = Gtk.SpinButton(
             adjustment=Gtk.Adjustment(lower=0, upper=1000000, step_increment=10, page_increment=100),
             climb_rate=1.0, digits=0
