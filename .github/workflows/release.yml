@@ -106,6 +106,41 @@ jobs:
           sha256sum gtkittorrent.flatpak > gtkittorrent.flatpak.sha256
           echo "FLATPAK_SHA=$(awk '{print $1}' gtkittorrent.flatpak.sha256)" >> "$GITHUB_ENV"
 
+      - name: Generate commit changelog
+        run: |
+          TAG="${{ steps.bump.outputs.TAG }}"
+          VERSION="${{ steps.bump.outputs.VERSION }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log "${PREV_TAG}..${TAG}^" --no-merges --pretty=format:"- %s (%h)")
+            RANGE_LABEL="Changes since ${PREV_TAG}"
+          else
+            COMMITS=$(git log "${TAG}^" --no-merges --pretty=format:"- %s (%h)")
+            RANGE_LABEL="Changes"
+          fi
+
+          if [ -z "$COMMITS" ]; then
+            COMMITS="- No changes"
+          fi
+
+          {
+            echo "### Release ${TAG}"
+            echo ""
+            echo "#### ${RANGE_LABEL}"
+            echo "${COMMITS}"
+            echo ""
+            echo "#### Flatpak Installation"
+            echo "Download \`gtkittorrent.flatpak\` and install:"
+            echo '```bash'
+            echo "flatpak install --user gtkittorrent.flatpak"
+            echo '```'
+            echo ""
+            echo "#### Checksums:"
+            echo "- \`gtkittorrent.flatpak\`: \`${FLATPAK_SHA}\`"
+            echo "- \`gtkittorrent-${VERSION}.tar.gz\`: \`${TARBALL_SHA}\`"
+          } > release_notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -116,16 +151,5 @@ jobs:
             gtkittorrent-${{ steps.bump.outputs.VERSION }}.tar.gz.sha256
             gtkittorrent.flatpak
             gtkittorrent.flatpak.sha256
-          body: |
-            ### Release ${{ steps.bump.outputs.TAG }}
-
-            #### Flatpak Installation
-            Download `gtkittorrent.flatpak` and install:
-            ```bash
-            flatpak install --user gtkittorrent.flatpak
-            ```
-
-            #### Checksums:
-            - `gtkittorrent.flatpak`: `${{ env.FLATPAK_SHA }}`
-            - `gtkittorrent-${{ steps.bump.outputs.VERSION }}.tar.gz`: `${{ env.TARBALL_SHA }}`
+          body_path: release_notes.md
           generate_release_notes: true
